@@ -1,0 +1,25 @@
+# Pastas pesadas de dependências
+Backend/vendor/
+Frontend/node_modules/
+
+# Arquivos de ambiente e segredos
+Backend/.env
+Backend/.env.backup
+Backend/.env.production
+Frontend/.env
+Frontend/.env.local
+
+# Builds de produção e caches
+Frontend/dist/
+Frontend/build/
+Backend/public/build/
+Backend/public/hot
+Backend/storage/*.key
+Backend/storage/pail/
+
+# Logs e arquivos de sistema
+*.log
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
