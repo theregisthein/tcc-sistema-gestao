@@ -6,7 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class CategoriaConfig extends Model
 {
-    protected $table = 'CategoriaConfig';
-    protected $fillable = ['nome'];
-    public $timestamps = false;
+    protected $table = 'categoria_config';
+    protected $fillable = [
+        'nome',
+    ];
 }

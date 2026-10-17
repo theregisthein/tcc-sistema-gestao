@@ -1,7 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 
-// Shared state exported via a simple module-level store (lifted to avoid prop drilling)
-// In a real app this would be context/zustand; here we use exported mutable arrays
+// Export mantido para compatibilidade com Tickets.jsx e outras telas
 export const configStore = {
   statusOptions: ["Aberto", "A fazer", "Pendente", "Resolvido", "Vencido"],
   priorityOptions: ["Alta", "Média", "Baixa"],
@@ -10,108 +9,217 @@ export const configStore = {
   planOptions: ["Starter", "Profissional", "Enterprise"],
 };
 
-function CrudList({ title, items, onAdd, onRemove, onEdit, locked = [] }) {
+const BASE_URL = "http://localhost:8000/api";
+
+// Componente CRUD Genérico para Status, Canal e Categoria
+function CrudListApi({ title, endpoint, lockedNames = [] }) {
+  const [items, setItems] = useState([]);
   const [newValue, setNewValue] = useState("");
-  const [editingIdx, setEditingIdx] = useState(null);
+  const [editingId, setEditingId] = useState(null);
   const [editValue, setEditValue] = useState("");
+  const [loading, setLoading] = useState(false);
 
-  function handleAdd() {
-    const v = newValue.trim();
-    if (!v || items.includes(v)) return;
-    onAdd(v);
-    setNewValue("");
-  }
-
-  function startEdit(idx) {
-    setEditingIdx(idx);
-    setEditValue(items[idx]);
-  }
-
-  function confirmEdit(idx) {
-    const v = editValue.trim();
-    if (v && v !== items[idx] && !items.includes(v)) {
-      onEdit(items[idx], v);
+  const fetchItems = async () => {
+    try {
+      setLoading(true);
+      const res = await fetch(`${BASE_URL}${endpoint}`);
+      if (!res.ok) throw new Error("Erro ao carregar dados");
+      const data = await res.json();
+      setItems(data);
+    } catch (err) {
+      console.error(`Erro ao carregar ${title}:`, err);
+    } finally {
+      setLoading(false);
     }
-    setEditingIdx(null);
+  };
+
+  useEffect(() => {
+    fetchItems();
+  }, [endpoint]);
+
+  async function handleAdd() {
+    const v = newValue.trim();
+    if (!v || items.some((i) => i.nome.toLowerCase() === v.toLowerCase())) return;
+
+    try {
+      const res = await fetch(`${BASE_URL}${endpoint}`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ nome: v }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.message || `Erro ao adicionar em ${title}`);
+        return;
+      }
+
+      setNewValue("");
+      fetchItems();
+    } catch (err) {
+      console.error(err);
+      alert(`Erro de conexão ao adicionar em ${title}`);
+    }
+  }
+
+  function startEdit(item) {
+    if (lockedNames.includes(item.nome)) return;
+    setEditingId(item.id);
+    setEditValue(item.nome);
+  }
+
+  async function confirmEdit(id) {
+    const v = editValue.trim();
+    if (v) {
+      try {
+        const res = await fetch(`${BASE_URL}${endpoint}/${id}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({ nome: v }),
+        });
+
+        if (!res.ok) throw new Error("Erro ao editar");
+        fetchItems();
+      } catch (err) {
+        console.error(err);
+        alert(`Erro ao atualizar item em ${title}`);
+      }
+    }
+    setEditingId(null);
+  }
+
+  async function handleRemove(id, nome) {
+    if (lockedNames.includes(nome)) return;
+    if (!window.confirm("Pretende realmente remover este registo?")) return;
+    try {
+      const res = await fetch(`${BASE_URL}${endpoint}/${id}`, {
+        method: "DELETE",
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) throw new Error("Erro ao eliminar");
+      fetchItems();
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao remover registo. Verifique se não está vinculado a tickets.");
+    }
   }
 
   return (
     <div>
-      <div className="text-xs font-semibold uppercase tracking-wider mb-3 pb-2 border-b" style={{ color: "#64748B", borderColor: "#E2E8F0" }}>
+      <div
+        className="text-xs font-semibold uppercase tracking-wider mb-3 pb-2 border-b"
+        style={{ color: "#64748B", borderColor: "#E2E8F0" }}
+      >
         {title}
       </div>
-      <div className="space-y-1.5 mb-3">
-        {items.map((item, idx) => (
-          <div
-            key={item}
-            className="flex items-center gap-2 px-3 py-2.5 rounded-xl border bg-white"
-            style={{ borderColor: "#E2E8F0" }}
-          >
-            {editingIdx === idx ? (
-              <input
-                className="flex-1 text-sm outline-none bg-transparent"
-                value={editValue}
-                onChange={(e) => setEditValue(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter") confirmEdit(idx); if (e.key === "Escape") setEditingIdx(null); }}
-                autoFocus
-                style={{ color: "#1E293B" }}
-              />
-            ) : (
-              <span className="flex-1 text-sm font-medium" style={{ color: "#1E293B" }}>{item}</span>
-            )}
 
-            {editingIdx === idx ? (
-              <button
-                onClick={() => confirmEdit(idx)}
-                className="text-xs font-semibold px-2 py-0.5 rounded"
-                style={{ background: "#ECFDF5", color: "#10B981" }}
-              >
-                ✓ Salvar
-              </button>
-            ) : (
-              <button
-                onClick={() => startEdit(idx)}
-                className="text-xs font-medium"
-                style={{ color: "#0066CC" }}
-              >
-                Editar
-              </button>
-            )}
+      {loading && items.length === 0 ? (
+        <div className="text-xs py-2 text-slate-400">A carregar dados...</div>
+      ) : (
+        <div className="space-y-1.5 mb-3">
+          {items.map((item) => {
+            const isLocked = lockedNames.includes(item.nome);
 
-            {!locked.includes(item) && editingIdx !== idx && (
-              <button
-                onClick={() => onRemove(item)}
-                className="text-xs font-medium"
-                style={{ color: "#E11D48" }}
+            return (
+              <div
+                key={item.id}
+                className="flex items-center gap-2 px-3 py-2.5 rounded-xl border bg-white"
+                style={{ borderColor: "#E2E8F0" }}
               >
-                Remover
-              </button>
-            )}
-            {locked.includes(item) && (
-              <span className="text-[10px]" style={{ color: "#94A3B8" }}>🔒</span>
-            )}
-          </div>
-        ))}
-      </div>
+                {editingId === item.id ? (
+                  <input
+                    className="flex-1 text-sm outline-none bg-transparent"
+                    value={editValue}
+                    onChange={(e) => setEditValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") confirmEdit(item.id);
+                      if (e.key === "Escape") setEditingId(null);
+                    }}
+                    autoFocus
+                    style={{ color: "#1E293B" }}
+                  />
+                ) : (
+                  <span className="flex-1 text-sm font-medium" style={{ color: "#1E293B" }}>
+                    {item.nome}
+                  </span>
+                )}
+
+                {editingId === item.id ? (
+                  <button
+                    onClick={() => confirmEdit(item.id)}
+                    className="text-xs font-semibold px-2 py-0.5 rounded cursor-pointer"
+                    style={{ background: "#ECFDF5", color: "#10B981" }}
+                  >
+                    ✓ Guardar
+                  </button>
+                ) : (
+                  !isLocked && (
+                    <button
+                      onClick={() => startEdit(item)}
+                      className="text-xs font-medium cursor-pointer"
+                      style={{ color: "#0066CC" }}
+                    >
+                      Editar
+                    </button>
+                  )
+                )}
+
+                {!isLocked && editingId !== item.id && (
+                  <button
+                    onClick={() => handleRemove(item.id, item.nome)}
+                    className="text-xs font-medium cursor-pointer"
+                    style={{ color: "#E11D48" }}
+                  >
+                    Remover
+                  </button>
+                )}
+
+                {isLocked && (
+                  <span
+                    className="text-[10px]"
+                    style={{ color: "#94A3B8" }}
+                    title="Opção padrão do sistema (bloqueada para edição e remoção)"
+                  >
+                    🔒
+                  </span>
+                )}
+              </div>
+            );
+          })}
+          {!loading && items.length === 0 && (
+            <div className="text-xs py-2 text-slate-400">Nenhum registo cadastrado.</div>
+          )}
+        </div>
+      )}
+
       <div className="flex gap-2">
         <input
           type="text"
           placeholder={`Nova opção de ${title.toLowerCase()}...`}
           value={newValue}
           onChange={(e) => setNewValue(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter") handleAdd(); }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") handleAdd();
+          }}
           className="flex-1 text-sm border rounded-xl px-3 py-2 outline-none"
           style={{ borderColor: "#E2E8F0", color: "#1E293B" }}
         />
         <button
           onClick={handleAdd}
-          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-white"
+          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-white cursor-pointer"
           style={{ background: "#0066CC" }}
           onMouseEnter={(e) => { e.currentTarget.style.background = "#0054a8"; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = "#0066CC"; }}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-            <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
           </svg>
           Adicionar
         </button>
@@ -120,70 +228,582 @@ function CrudList({ title, items, onAdd, onRemove, onEdit, locked = [] }) {
   );
 }
 
+// Componente CRUD específico para Prioridades (com Nome + Prazo)
+function CrudPrioridadeApi({ prioridades, onReload, lockedNames = ["Alta", "Média", "Baixa"] }) {
+  const [novoNome, setNovoNome] = useState("");
+  const [novoPrazo, setNovoPrazo] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editNome, setEditNome] = useState("");
+  const [editPrazo, setEditPrazo] = useState("");
+
+  async function handleAdd() {
+    const nome = novoNome.trim();
+    const prazo = novoPrazo.trim();
+
+    if (!nome || !prazo) {
+      alert("Preencha o nome e o prazo da prioridade.");
+      return;
+    }
+
+    try {
+      const res = await fetch(`${BASE_URL}/prioridades-config`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ nome, prazo }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.message || "Erro ao adicionar prioridade");
+        return;
+      }
+
+      setNovoNome("");
+      setNovoPrazo("");
+      onReload();
+    } catch (err) {
+      console.error(err);
+      alert("Erro de conexão ao adicionar prioridade");
+    }
+  }
+
+  function startEdit(item) {
+    if (lockedNames.includes(item.nome)) return;
+    setEditingId(item.id);
+    setEditNome(item.nome);
+    setEditPrazo(item.prazo || "");
+  }
+
+  async function confirmEdit(id) {
+    const nome = editNome.trim();
+    const prazo = editPrazo.trim();
+
+    if (nome && prazo) {
+      try {
+        const res = await fetch(`${BASE_URL}/prioridades-config/${id}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({ nome, prazo }),
+        });
+
+        if (!res.ok) throw new Error("Erro ao atualizar");
+        onReload();
+      } catch (err) {
+        console.error(err);
+        alert("Erro ao atualizar prioridade");
+      }
+    }
+    setEditingId(null);
+  }
+
+  async function handleRemove(id, nome) {
+    if (lockedNames.includes(nome)) return;
+    if (!window.confirm("Pretende realmente remover esta prioridade?")) return;
+    try {
+      const res = await fetch(`${BASE_URL}/prioridades-config/${id}`, {
+        method: "DELETE",
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) throw new Error("Erro ao eliminar");
+      onReload();
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao remover prioridade. Verifique se não está vinculada a tickets.");
+    }
+  }
+
+  return (
+    <div>
+      <div
+        className="text-xs font-semibold uppercase tracking-wider mb-3 pb-2 border-b"
+        style={{ color: "#64748B", borderColor: "#E2E8F0" }}
+      >
+        Adicionar / Gerir Opções de Prioridade
+      </div>
+
+      <div className="space-y-1.5 mb-3">
+        {prioridades.map((item) => {
+          const isLocked = lockedNames.includes(item.nome);
+
+          return (
+            <div
+              key={item.id}
+              className="flex items-center gap-2 px-3 py-2.5 rounded-xl border bg-white"
+              style={{ borderColor: "#E2E8F0" }}
+            >
+              {editingId === item.id ? (
+                <div className="flex-1 flex gap-2">
+                  <input
+                    className="flex-1 text-sm border rounded-lg px-2 py-1 outline-none"
+                    value={editNome}
+                    onChange={(e) => setEditNome(e.target.value)}
+                    placeholder="Nome"
+                    style={{ borderColor: "#0066CC", color: "#1E293B" }}
+                  />
+                  <input
+                    className="w-28 text-sm border rounded-lg px-2 py-1 outline-none"
+                    value={editPrazo}
+                    onChange={(e) => setEditPrazo(e.target.value)}
+                    placeholder="Prazo"
+                    style={{ borderColor: "#0066CC", color: "#1E293B" }}
+                  />
+                </div>
+              ) : (
+                <div className="flex-1 flex items-center justify-between">
+                  <span className="text-sm font-medium" style={{ color: "#1E293B" }}>
+                    {item.nome}
+                  </span>
+                  <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-mono">
+                    SLA: {item.prazo || "Sem prazo"}
+                  </span>
+                </div>
+              )}
+
+              {editingId === item.id ? (
+                <button
+                  onClick={() => confirmEdit(item.id)}
+                  className="text-xs font-semibold px-2 py-0.5 rounded cursor-pointer"
+                  style={{ background: "#ECFDF5", color: "#10B981" }}
+                >
+                  ✓ Guardar
+                </button>
+              ) : (
+                !isLocked && (
+                  <button
+                    onClick={() => startEdit(item)}
+                    className="text-xs font-medium cursor-pointer"
+                    style={{ color: "#0066CC" }}
+                  >
+                    Editar
+                  </button>
+                )
+              )}
+
+              {!isLocked && editingId !== item.id && (
+                <button
+                  onClick={() => handleRemove(item.id, item.nome)}
+                  className="text-xs font-medium cursor-pointer"
+                  style={{ color: "#E11D48" }}
+                >
+                  Remover
+                </button>
+              )}
+
+              {isLocked && (
+                <span
+                  className="text-[10px]"
+                  style={{ color: "#94A3B8" }}
+                  title="Prioridade padrão (bloqueada para edição e remoção)"
+                >
+                  🔒
+                </span>
+              )}
+            </div>
+          );
+        })}
+        {prioridades.length === 0 && (
+          <div className="text-xs py-2 text-slate-400">Nenhum registo cadastrado.</div>
+        )}
+      </div>
+
+      <div className="flex gap-2">
+        <input
+          type="text"
+          placeholder="Nome da prioridade (ex: Urgente, Bloqueante)..."
+          value={novoNome}
+          onChange={(e) => setNovoNome(e.target.value)}
+          className="flex-1 text-sm border rounded-xl px-3 py-2 outline-none"
+          style={{ borderColor: "#E2E8F0", color: "#1E293B" }}
+        />
+        <input
+          type="text"
+          placeholder="Prazo (ex: 2h, 24h, 3 dias)..."
+          value={novoPrazo}
+          onChange={(e) => setNovoPrazo(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") handleAdd();
+          }}
+          className="w-48 text-sm border rounded-xl px-3 py-2 outline-none"
+          style={{ borderColor: "#E2E8F0", color: "#1E293B" }}
+        />
+        <button
+          onClick={handleAdd}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-white cursor-pointer"
+          style={{ background: "#0066CC" }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "#0054a8"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "#0066CC"; }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+          Adicionar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Componente CRUD para Planos de Clientes
+function CrudPlanosApi() {
+  const [planos, setPlanos] = useState([]);
+  const [novoNome, setNovoNome] = useState("");
+  const [novoValor, setNovoValor] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editNome, setEditNome] = useState("");
+  const [editValor, setEditValor] = useState("");
+  const [carregando, setCarregando] = useState(false);
+
+  const carregarPlanos = async () => {
+    try {
+      setCarregando(true);
+      const res = await fetch(`${BASE_URL}/planos`);
+      if (!res.ok) throw new Error("Erro ao carregar planos");
+      const dados = await res.json();
+      setPlanos(dados);
+    } catch (err) {
+      console.error("Erro ao buscar planos:", err);
+    } finally {
+      setCarregando(false);
+    }
+  };
+
+  useEffect(() => {
+    carregarPlanos();
+  }, []);
+
+  async function handleAdd() {
+    const nome = novoNome.trim();
+    const valor = parseFloat(novoValor.replace(",", "."));
+
+    if (!nome || isNaN(valor)) {
+      alert("Informe o nome do plano e um valor numérico válido.");
+      return;
+    }
+
+    try {
+      const res = await fetch(`${BASE_URL}/planos`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ nome, valor }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.message || "Erro ao adicionar plano");
+        return;
+      }
+
+      setNovoNome("");
+      setNovoValor("");
+      carregarPlanos();
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao conectar com a API de planos");
+    }
+  }
+
+  function startEdit(item) {
+    setEditingId(item.id);
+    setEditNome(item.nome);
+    setEditValor(item.valor);
+  }
+
+  async function confirmEdit(id) {
+    const nome = editNome.trim();
+    const valor = parseFloat(String(editValor).replace(",", "."));
+
+    if (nome && !isNaN(valor)) {
+      try {
+        const res = await fetch(`${BASE_URL}/planos/${id}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({ nome, valor }),
+        });
+
+        if (!res.ok) throw new Error("Erro ao atualizar plano");
+        carregarPlanos();
+      } catch (err) {
+        console.error(err);
+        alert("Erro ao atualizar plano");
+      }
+    }
+    setEditingId(null);
+  }
+
+  async function handleRemove(id) {
+    if (!window.confirm("Pretende realmente remover este plano?")) return;
+    try {
+      const res = await fetch(`${BASE_URL}/planos/${id}`, {
+        method: "DELETE",
+        headers: { Accept: "application/json" },
+      });
+      if (!res.ok) throw new Error("Erro ao excluir plano");
+      carregarPlanos();
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao excluir plano. Verifique se não está vinculado a clientes.");
+    }
+  }
+
+  return (
+    <div>
+      <div className="space-y-1.5 mb-3">
+        {planos.map((item) => (
+          <div
+            key={item.id}
+            className="flex items-center gap-2 px-3 py-2.5 rounded-xl border bg-white"
+            style={{ borderColor: "#E2E8F0" }}
+          >
+            {editingId === item.id ? (
+              <div className="flex-1 flex gap-2">
+                <input
+                  className="flex-1 text-sm border rounded-lg px-2 py-1 outline-none"
+                  value={editNome}
+                  onChange={(e) => setEditNome(e.target.value)}
+                  placeholder="Nome do plano"
+                  style={{ borderColor: "#0066CC", color: "#1E293B" }}
+                />
+                <input
+                  type="number"
+                  step="0.01"
+                  className="w-32 text-sm border rounded-lg px-2 py-1 outline-none"
+                  value={editValor}
+                  onChange={(e) => setEditValor(e.target.value)}
+                  placeholder="Valor (R$)"
+                  style={{ borderColor: "#0066CC", color: "#1E293B" }}
+                />
+              </div>
+            ) : (
+              <div className="flex-1 flex items-center justify-between">
+                <span className="text-sm font-medium" style={{ color: "#1E293B" }}>
+                  {item.nome}
+                </span>
+                <span className="text-xs px-2.5 py-1 rounded-lg bg-emerald-50 text-emerald-700 font-semibold border border-emerald-200">
+                  {Number(item.valor).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                </span>
+              </div>
+            )}
+
+            {editingId === item.id ? (
+              <button
+                onClick={() => confirmEdit(item.id)}
+                className="text-xs font-semibold px-2 py-0.5 rounded cursor-pointer"
+                style={{ background: "#ECFDF5", color: "#10B981" }}
+              >
+                ✓ Guardar
+              </button>
+            ) : (
+              <button
+                onClick={() => startEdit(item)}
+                className="text-xs font-medium cursor-pointer"
+                style={{ color: "#0066CC" }}
+              >
+                Editar
+              </button>
+            )}
+
+            {editingId !== item.id && (
+              <button
+                onClick={() => handleRemove(item.id)}
+                className="text-xs font-medium cursor-pointer"
+                style={{ color: "#E11D48" }}
+              >
+                Remover
+              </button>
+            )}
+          </div>
+        ))}
+
+        {!carregando && planos.length === 0 && (
+          <div className="text-xs py-2 text-slate-400">Nenhum plano registado.</div>
+        )}
+      </div>
+
+      <div className="flex gap-2">
+        <input
+          type="text"
+          placeholder="Nome do plano (ex: Starter, Pro, Enterprise)..."
+          value={novoNome}
+          onChange={(e) => setNovoNome(e.target.value)}
+          className="flex-1 text-sm border rounded-xl px-3 py-2 outline-none"
+          style={{ borderColor: "#E2E8F0", color: "#1E293B" }}
+        />
+        <input
+          type="number"
+          step="0.01"
+          placeholder="Valor (ex: 299.90)..."
+          value={novoValor}
+          onChange={(e) => setNovoValor(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") handleAdd();
+          }}
+          className="w-44 text-sm border rounded-xl px-3 py-2 outline-none"
+          style={{ borderColor: "#E2E8F0", color: "#1E293B" }}
+        />
+        <button
+          onClick={handleAdd}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-white cursor-pointer"
+          style={{ background: "#0066CC" }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "#0054a8"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "#0066CC"; }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+          Adicionar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Linha de Prioridade com atribuição dinâmica de cores
+function SlaRowApi({ prioridade, onUpdate }) {
+  const [prazo, setPrazo] = useState(prioridade.prazo || "");
+  const [salvando, setSalvando] = useState(false);
+
+  const paletaCores = [
+    { color: "#2563EB", bg: "#EFF6FF" },
+    { color: "#7C3AED", bg: "#F5F3FF" },
+    { color: "#DB2777", bg: "#FDF2F8" },
+    { color: "#0D9488", bg: "#F0FDFA" },
+  ];
+
+  const configCores = {
+    Alta: { color: "#F26522", bg: "#FFF1E8" },
+    Média: { color: "#F59E0B", bg: "#FFFBEB" },
+    Baixa: { color: "#10B981", bg: "#ECFDF5" },
+  };
+
+  const estilo =
+    configCores[prioridade.nome] ||
+    paletaCores[prioridade.id % paletaCores.length];
+
+  const handleBlur = async () => {
+    if (prazo !== prioridade.prazo) {
+      try {
+        setSalvando(true);
+        await fetch(`${BASE_URL}/prioridades-config/${prioridade.id}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({ prazo }),
+        });
+        onUpdate();
+      } catch (err) {
+        console.error("Erro ao atualizar prazo de SLA:", err);
+      } finally {
+        setSalvando(false);
+      }
+    }
+  };
+
+  return (
+    <tr className="border-t" style={{ borderColor: "#E2E8F0" }}>
+      <td className="px-4 py-3">
+        <span className="flex items-center gap-2 text-sm font-medium" style={{ color: estilo.color }}>
+          <span className="w-2.5 h-2.5 rounded-full" style={{ background: estilo.color }} />
+          {prioridade.nome}
+        </span>
+      </td>
+      <td className="px-4 py-3">
+        <div className="flex items-center gap-2">
+          <input
+            type="text"
+            value={prazo}
+            onChange={(e) => setPrazo(e.target.value)}
+            onBlur={handleBlur}
+            placeholder="Ex: 24h"
+            className="w-32 text-sm border rounded-lg px-3 py-1.5 outline-none font-medium"
+            style={{ borderColor: estilo.color + "50", background: estilo.bg, color: estilo.color }}
+          />
+          {salvando && <span className="text-[11px] text-slate-400">A guardar...</span>}
+        </div>
+      </td>
+    </tr>
+  );
+}
+
+function Section({ title, children }) {
+  return (
+    <div
+      className="bg-white rounded-xl border p-6"
+      style={{ borderColor: "#E2E8F0", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}
+    >
+      <h2 className="text-base font-semibold mb-4" style={{ color: "#1E293B" }}>
+        {title}
+      </h2>
+      {children}
+    </div>
+  );
+}
+
 export default function Configuracoes() {
   const [emailSync, setEmailSync] = useState(true);
   const [emailAddress, setEmailAddress] = useState("suporte@fretegestao.com.br");
-  const [slaAlta, setSlaAlta] = useState({ resposta: "2", resolucao: "24" });
-  const [slaMedia, setSlaMedia] = useState({ resposta: "8", resolucao: "72" });
-  const [slaBaixa, setSlaBaixa] = useState({ resposta: "24", resolucao: "168" });
+  const [prioridades, setPrioridades] = useState([]);
 
-  // Ticket field options (editable)
-  const [statusOptions, setStatusOptions] = useState([...configStore.statusOptions]);
-  const [priorityOptions, setPriorityOptions] = useState([...configStore.priorityOptions]);
-  const [categoryOptions, setCategoryOptions] = useState([...configStore.categoryOptions]);
-  const [channelOptions, setChannelOptions] = useState([...configStore.channelOptions]);
-  const [planOptions, setPlanOptions] = useState([...configStore.planOptions]);
+  const carregarPrioridades = async () => {
+    try {
+      const res = await fetch(`${BASE_URL}/prioridades-config`);
+      if (!res.ok) throw new Error("Erro ao carregar prioridades");
+      const dados = await res.json();
+      setPrioridades(dados);
+    } catch (err) {
+      console.error("Erro ao carregar PrioridadeConfig:", err);
+    }
+  };
 
-  function makeCrud(list, setList, storeKey) {
-    return {
-      onAdd: (item) => {
-        const next = [...list, item];
-        setList(next);
-        configStore[storeKey].length = 0;
-        configStore[storeKey].push(...next);
-      },
-      onRemove: (item) => {
-        const next = list.filter((x) => x !== item);
-        setList(next);
-        configStore[storeKey].length = 0;
-        configStore[storeKey].push(...next);
-      },
-      onEdit: (oldItem, newItem) => {
-        const next = list.map((x) => (x === oldItem ? newItem : x));
-        setList(next);
-        configStore[storeKey].length = 0;
-        configStore[storeKey].push(...next);
-      },
-    };
-  }
-
-  const statusCrud = makeCrud(statusOptions, setStatusOptions, "statusOptions");
-  const priorityCrud = makeCrud(priorityOptions, setPriorityOptions, "priorityOptions");
-  const categoryCrud = makeCrud(categoryOptions, setCategoryOptions, "categoryOptions");
-  const channelCrud = makeCrud(channelOptions, setChannelOptions, "channelOptions");
-  const planCrud = makeCrud(planOptions, setPlanOptions, "planOptions");
+  useEffect(() => {
+    carregarPrioridades();
+  }, []);
 
   return (
     <div className="flex-1 overflow-y-auto" style={{ background: "#F4F6F9" }}>
       <div className="px-6 py-4 border-b bg-white" style={{ borderColor: "#E2E8F0" }}>
-        <h1 className="text-lg font-bold" style={{ color: "#1E293B" }}>⚙️ Configurações do Sistema</h1>
-        <p className="text-sm mt-0.5" style={{ color: "#64748B" }}>Integrações, SLAs, opções de campos e parâmetros globais da plataforma</p>
+        <h1 className="text-lg font-bold" style={{ color: "#1E293B" }}>
+          ⚙️ Configurações do Sistema
+        </h1>
+        <p className="text-sm mt-0.5" style={{ color: "#64748B" }}>
+          Integrações, SLAs, opções de campos e parâmetros globais da plataforma
+        </p>
       </div>
 
       <div className="max-w-3xl mx-auto px-6 py-6 space-y-6">
         {/* Email integration */}
         <Section title="📧 Ingestão Automática de E-mails Corporativos">
           <div className="space-y-4">
-            <div className="flex items-center justify-between p-4 rounded-xl border" style={{ borderColor: "#E2E8F0", background: "#F8FAFC" }}>
+            <div
+              className="flex items-center justify-between p-4 rounded-xl border"
+              style={{ borderColor: "#E2E8F0", background: "#F8FAFC" }}
+            >
               <div>
-                <div className="font-medium text-sm" style={{ color: "#1E293B" }}>Sincronização Automática de E-mails</div>
+                <div className="font-medium text-sm" style={{ color: "#1E293B" }}>
+                  Sincronização Automática de E-mails
+                </div>
                 <div className="text-xs mt-0.5" style={{ color: "#64748B" }}>
                   E-mails recebidos são convertidos automaticamente em tickets de suporte
                 </div>
               </div>
               <button
                 onClick={() => setEmailSync(!emailSync)}
-                className="relative w-11 h-6 rounded-full transition-all flex-shrink-0"
+                className="relative w-11 h-6 rounded-full transition-all flex-shrink-0 cursor-pointer"
                 style={{ background: emailSync ? "#10B981" : "#CBD5E1" }}
               >
                 <div
@@ -193,7 +813,9 @@ export default function Configuracoes() {
               </button>
             </div>
             <div>
-              <label className="text-xs font-medium block mb-1.5" style={{ color: "#64748B" }}>Conta de E-mail Monitorada</label>
+              <label className="text-xs font-medium block mb-1.5" style={{ color: "#64748B" }}>
+                Conta de E-mail Monitorada
+              </label>
               <input
                 type="email"
                 value={emailAddress}
@@ -202,110 +824,80 @@ export default function Configuracoes() {
                 style={{ borderColor: "#E2E8F0", color: "#1E293B", background: "#fff" }}
               />
             </div>
-            <div className="rounded-xl p-4 border" style={{ background: "#ECFDF5", borderColor: "#A7F3D0" }}>
-              <div className="flex items-start gap-3">
-                <span className="text-lg">🔄</span>
-                <div>
-                  <div className="font-semibold text-sm mb-1" style={{ color: "#065F46" }}>Regras de Conversão Automática</div>
-                  <ul className="space-y-1">
-                    {["Assunto do e-mail → Título do Ticket", "Corpo da mensagem → Descrição inicial do Ticket", "Remetente → Identificação do solicitante (validado na base)", "Respostas no mesmo thread → Adicionadas ao ticket original"].map((r) => (
-                      <li key={r} className="text-xs flex items-center gap-2" style={{ color: "#047857" }}>
-                        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: "#10B981" }} />{r}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            </div>
           </div>
         </Section>
 
-        {/* SLA */}
-        <Section title="⏱️ Gestão de SLAs e Prazos">
+        {/* SLAs e Prazos com PrioridadeConfig */}
+        <Section title="⏱️ Gestão de SLAs e Prazos por Prioridade">
           <p className="text-xs mb-3" style={{ color: "#64748B" }}>
-            Configure os prazos máximos (em horas) para primeira resposta e resolução por prioridade.
+            Configure o prazo máximo de resolução para cada prioridade registrada na base de dados.
           </p>
-          <div className="overflow-hidden rounded-xl border" style={{ borderColor: "#E2E8F0" }}>
+          <div className="overflow-hidden rounded-xl border mb-4" style={{ borderColor: "#E2E8F0" }}>
             <table className="w-full text-sm">
               <thead>
                 <tr style={{ background: "#F8FAFC", borderBottom: "1px solid #E2E8F0" }}>
-                  {["Prioridade", "Primeira Resposta (horas)", "Resolução (horas)"].map((h) => (
-                    <th key={h} className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide" style={{ color: "#64748B" }}>{h}</th>
-                  ))}
+                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide" style={{ color: "#64748B" }}>
+                    Prioridade
+                  </th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide" style={{ color: "#64748B" }}>
+                    Prazo / SLA
+                  </th>
                 </tr>
               </thead>
               <tbody>
-                <SlaRow priority="Alta" color="#F26522" bg="#FFF1E8" sla={slaAlta} onChange={setSlaAlta} />
-                <SlaRow priority="Média" color="#F59E0B" bg="#FFFBEB" sla={slaMedia} onChange={setSlaMedia} />
-                <SlaRow priority="Baixa" color="#10B981" bg="#ECFDF5" sla={slaBaixa} onChange={setSlaBaixa} />
+                {prioridades.map((p) => (
+                  <SlaRowApi key={p.id} prioridade={p} onUpdate={carregarPrioridades} />
+                ))}
+                {prioridades.length === 0 && (
+                  <tr>
+                    <td colSpan="2" className="px-4 py-3 text-xs text-slate-400">
+                      Nenhuma prioridade cadastrada no banco de dados.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
+
+          <CrudPrioridadeApi
+            prioridades={prioridades}
+            onReload={carregarPrioridades}
+            lockedNames={["Alta", "Média", "Baixa"]}
+          />
         </Section>
 
-        {/* Ticket field options */}
+        {/* Opções de Campos dos Tickets */}
         <Section title="🏷️ Opções de Campos dos Tickets">
           <p className="text-xs mb-4" style={{ color: "#64748B" }}>
-            Gerencie as opções disponíveis nos campos de Status, Prioridade, Categoria e Canal dos tickets. Estas opções aparecem como seleção na tela de atendimento.
+            Gerencie as opções guardadas nas tabelas de configuração do sistema.
           </p>
           <div className="grid grid-cols-1 gap-6">
-            <CrudList title="Status" items={statusOptions} {...statusCrud} locked={["Aberto", "Resolvido"]} />
-            <CrudList title="Prioridade" items={priorityOptions} {...priorityCrud} locked={["Alta", "Média", "Baixa"]} />
-            <CrudList title="Categoria / Tipo de Ticket" items={categoryOptions} {...categoryCrud} />
-            <CrudList title="Canal de Atendimento" items={channelOptions} {...channelCrud} locked={["E-mail", "WhatsApp"]} />
+            <CrudListApi
+              title="Status"
+              endpoint="/status-config"
+              lockedNames={["Aberto", "Resolvido", "Fechado", "A fazer", "Pendente", "Vencido"]}
+            />
+            <CrudListApi
+              title="Categoria / Tipo de Ticket"
+              endpoint="/categorias-config"
+              lockedNames={["Atualização de Tabela", "Nova Tabela", "Dúvidas do Sistema"]}
+            />
+            <CrudListApi
+              title="Canal de Atendimento"
+              endpoint="/canais-config"
+              lockedNames={["E-mail", "WhatsApp"]}
+            />
           </div>
         </Section>
 
-        {/* Plan options */}
+        {/* Plan options ligadas à tabela plano */}
         <Section title="📦 Planos de Clientes">
           <p className="text-xs mb-4" style={{ color: "#64748B" }}>
-            Gerencie os planos disponíveis para cadastro de clientes. Estas opções aparecem no campo Plano da tela de Clientes.
+            Gerencie os planos e seus respectivos valores comerciais para associação no cadastro de clientes.
           </p>
-          <CrudList title="Planos Disponíveis" items={planOptions} {...planCrud} locked={["Starter", "Profissional", "Enterprise"]} />
+          <CrudPlanosApi />
         </Section>
-
-        <div className="flex justify-end">
-          <button
-            className="px-6 py-2.5 rounded-lg text-sm font-semibold text-white"
-            style={{ background: "#0066CC" }}
-            onMouseEnter={(e) => { e.currentTarget.style.background = "#0054a8"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = "#0066CC"; }}
-          >
-            Salvar Configurações
-          </button>
-        </div>
       </div>
-    </div>
-  );
-}
-
-function SlaRow({ priority, color, bg, sla, onChange }) {
-  return (
-    <tr className="border-t" style={{ borderColor: "#E2E8F0" }}>
-      <td className="px-4 py-3">
-        <span className="flex items-center gap-2 text-sm font-medium" style={{ color }}>
-          <span className="w-2.5 h-2.5 rounded-full" style={{ background: color }} />{priority}
-        </span>
-      </td>
-      <td className="px-4 py-3">
-        <input type="number" value={sla.resposta} onChange={(e) => onChange({ ...sla, resposta: e.target.value })}
-          className="w-24 text-sm border rounded-lg px-3 py-1.5 outline-none font-medium"
-          style={{ borderColor: color + "50", background: bg, color }} />
-      </td>
-      <td className="px-4 py-3">
-        <input type="number" value={sla.resolucao} onChange={(e) => onChange({ ...sla, resolucao: e.target.value })}
-          className="w-24 text-sm border rounded-lg px-3 py-1.5 outline-none font-medium"
-          style={{ borderColor: color + "50", background: bg, color }} />
-      </td>
-    </tr>
-  );
-}
-
-function Section({ title, children }) {
-  return (
-    <div className="bg-white rounded-xl border p-6" style={{ borderColor: "#E2E8F0", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
-      <h2 className="text-base font-semibold mb-4" style={{ color: "#1E293B" }}>{title}</h2>
-      {children}
     </div>
   );
 }

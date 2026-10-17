@@ -6,7 +6,8 @@ use Illuminate\Database\Eloquent\Model;
 
 class CanalConfig extends Model
 {
-    protected $table = 'CanalConfig';
-    protected $fillable = ['nome'];
-    public $timestamps = false;
+    protected $table = 'canal_config';
+    protected $fillable = [
+        'nome',
+    ];
 }

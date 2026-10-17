@@ -6,7 +6,10 @@ use Illuminate\Database\Eloquent\Model;
 
 class PrioridadeConfig extends Model
 {
-    protected $table = 'PrioridadeConfig';
-    protected $fillable = ['nome', 'prazo'];
-    public $timestamps = false;
+    protected $table = 'prioridade_config';
+    
+    protected $fillable = [
+        'nome',
+        'prazo',
+    ];
 }

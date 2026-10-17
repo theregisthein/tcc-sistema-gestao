@@ -1,7 +1,14 @@
 <?php
 
 use Illuminate\Http\Request;
+
 use App\Http\Controllers\TransportadoraController;
+use App\Http\Controllers\StatusConfigController;
+use App\Http\Controllers\CanalConfigController;
+use App\Http\Controllers\CategoriaConfigController;
+use App\Http\Controllers\PrioridadeConfigController;
+use App\Http\Controllers\PlanoController;
+
 use Illuminate\Support\Facades\Route;
 
 Route::get('/user', function (Request $request) {
@@ -9,3 +16,13 @@ Route::get('/user', function (Request $request) {
 })->middleware('auth:sanctum');
 
 Route::apiResource('transportadoras', TransportadoraController::class);
+
+Route::apiResource('status-config', StatusConfigController::class);
+
+Route::apiResource('canais-config', CanalConfigController::class);
+
+Route::apiResource('categorias-config', CategoriaConfigController::class);
+
+Route::apiResource('prioridades-config', PrioridadeConfigController::class);
+
+Route::apiResource('planos', PlanoController::class);
