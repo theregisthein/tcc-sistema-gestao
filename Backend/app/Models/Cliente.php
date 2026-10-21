@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class Cliente extends Model
@@ -27,7 +28,7 @@ class Cliente extends Model
     // Relacionamento com Plano
     public function plano()
     {
-        return $this->belongsTo(Plano::class, 'plano_id');
+        return $this->belongsTo(Plano::class, 'plano_id', 'id');
     }
 
     // Um cliente pode ter vários contatos
@@ -36,17 +37,19 @@ class Cliente extends Model
         return $this->hasMany(ContatoCliente::class, 'cliente_id');
     }
 
-    // Um cliente pode ter várias empresas/filiais
+    // Um cliente pode ter várias empresas/filiais (Multi-CNPJ)
     public function empresas()
     {
-        return $this->hasMany(ClienteEmpresa::class, 'cliente_id');
+        return $this->hasMany(ClienteEmpresa::class, 'cliente_id', 'id');
     }
 
+    // Transportadoras homologadas vinculadas
     public function transportadoras()
     {
         return $this->belongsToMany(Transportadora::class, 'cliente_transportadora', 'cliente_id', 'transp_id');
     }
-    
+
+    // Módulos contratados vinculados
     public function modulos()
     {
         return $this->belongsToMany(Modulo::class, 'modulo_cliente', 'cliente_id', 'modulo_id');

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class ClienteEmpresa extends Model
@@ -17,6 +18,10 @@ class ClienteEmpresa extends Model
         'nomeFantasia',
         'is_matriz',
         'status',
+    ];
+
+    protected $casts = [
+        'is_matriz' => 'boolean',
     ];
 
     public function cliente()

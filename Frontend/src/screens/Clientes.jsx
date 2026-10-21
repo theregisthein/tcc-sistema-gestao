@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect } from "react"
-import { CLIENTES, TRANSPORTADORAS } from "../data/mock"
-import { configStore } from "./Configuracoes"
+import React, { useState, useRef, useEffect, Fragment } from "react"
+
+const BASE_URL = "http://localhost:8000/api"
 
 const PLAN_COLORS = {
   Enterprise: { bg: "#F5F3FF", color: "#7C3AED" },
@@ -8,167 +8,37 @@ const PLAN_COLORS = {
   Starter: { bg: "#ECFDF5", color: "#10B981" },
 }
 
-// Inline dropdown component
-function InlineSelect({
-  value,
-  options,
-  onChange,
-  renderOption,
-  renderSelected,
-}) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef(null)
-
-  useEffect(() => {
-    function handler(e) {
-      if (ref.current && !ref.current.contains(e.target)) setOpen(false)
-    }
-    document.addEventListener("mousedown", handler)
-    return () => document.removeEventListener("mousedown", handler)
-  }, [])
-
-  return (
-    <div className="relative inline-block" ref={ref}>
-      <button
-        onClick={(e) => {
-          e.stopPropagation()
-          setOpen(!open)
-        }}
-        className="flex items-center gap-1 rounded px-1 py-0.5 transition-colors hover:bg-[#F1F5F9] border border-transparent hover:border-[#E2E8F0]"
-      >
-        {renderSelected ? (
-          renderSelected(value)
-        ) : (
-          <span className="text-xs font-medium" style={{ color: "#1E293B" }}>
-            {value}
-          </span>
-        )}
-        <svg
-          width="9"
-          height="9"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="#94A3B8"
-          strokeWidth="2.5"
-        >
-          <path d="M6 9l6 6 6-6" />
-        </svg>
-      </button>
-      {open && (
-        <div
-          className="absolute left-0 top-full mt-1 z-50 rounded-xl overflow-hidden shadow-lg border min-w-[140px]"
-          style={{ background: "#fff", borderColor: "#E2E8F0" }}
-          onClick={(e) => e.stopPropagation()}
-        >
-          {options.map((opt) => (
-            <button
-              key={opt}
-              onClick={() => {
-                onChange(opt)
-                setOpen(false)
-              }}
-              className="w-full flex items-center gap-2 px-3 py-2 text-xs text-left hover:bg-[#F4F6F9] transition-colors"
-              style={{
-                background: opt === value ? "#F4F6F9" : "transparent",
-                fontWeight: opt === value ? 600 : 400,
-              }}
-            >
-              {opt === value && (
-                <svg
-                  width="10"
-                  height="10"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="#0066CC"
-                  strokeWidth="3"
-                >
-                  <polyline points="20 6 9 17 4 12" />
-                </svg>
-              )}
-              {opt !== value && <span className="w-2.5" />}
-              {renderOption ? (
-                renderOption(opt)
-              ) : (
-                <span style={{ color: "#1E293B" }}>{opt}</span>
-              )}
-            </button>
-          ))}
-        </div>
-      )}
-    </div>
-  )
+function maskCNPJ(value) {
+  return String(value || "")
+    .replace(/\D/g, "")
+    .slice(0, 14)
+    .replace(/^(\d{2})(\d)/, "$1.$2")
+    .replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3")
+    .replace(/\.(\d{3})(\d)/, ".$1/$2")
+    .replace(/(\d{4})(\d)/, "$1-$2")
 }
 
-// Inline editable text
-function InlineText({ value, onChange, placeholder }) {
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(String(value))
-
-  function confirm() {
-    onChange(draft)
-    setEditing(false)
+function formatMoneyBRL(value) {
+  if (value === null || value === undefined || value === "") return "R$ 0,00"
+  if (typeof value === "number") {
+    return value.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
   }
-
-  if (editing) {
-    return (
-      <input
-        className="text-xs border rounded px-1.5 py-0.5 outline-none w-28"
-        value={draft}
-        autoFocus
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={confirm}
-        onKeyDown={(e) => {
-          if (e.key === "Enter") confirm()
-          if (e.key === "Escape") {
-            setDraft(String(value))
-            setEditing(false)
-          }
-        }}
-        style={{ borderColor: "#0066CC", color: "#1E293B" }}
-      />
-    )
-  }
-
-  return (
-    <button
-      onClick={(e) => {
-        e.stopPropagation()
-        setEditing(true)
-      }}
-      className="flex items-center gap-1 text-xs rounded px-1 py-0.5 hover:bg-[#F1F5F9] border border-transparent hover:border-[#E2E8F0]"
-      style={{ color: "#1E293B" }}
-    >
-      <span className="font-medium">{value || placeholder}</span>
-      <svg
-        width="9"
-        height="9"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="#94A3B8"
-        strokeWidth="2"
-      >
-        <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-        <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-      </svg>
-    </button>
-  )
+  const digits = String(value).replace(/\D/g, "")
+  if (!digits) return "R$ 0,00"
+  return (Number(digits) / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
 }
 
-// Form field helper for modals
-function FormField({
-  label,
-  value,
-  onChange,
-  placeholder,
-  type = "text",
-  required = false,
-}) {
+function parseMoneyToFloat(value) {
+  if (typeof value === "number") return value
+  const digits = String(value).replace(/\D/g, "")
+  if (!digits) return 0
+  return Number(digits) / 100
+}
+
+function FormField({ label, value, onChange, placeholder, type = "text", required = false }) {
   return (
     <div>
-      <label
-        className="text-xs font-medium block mb-1.5"
-        style={{ color: "#64748B" }}
-      >
+      <label className="text-xs font-medium block mb-1.5" style={{ color: "#64748B" }}>
         {label} {required && <span className="text-red-500">*</span>}
       </label>
       <input
@@ -191,46 +61,7 @@ function FormField({
   )
 }
 
-function ModalSection({ title, children }) {
-  return (
-    <div>
-      <div
-        className="text-xs font-semibold uppercase tracking-wider mb-3 pb-2 border-b"
-        style={{ color: "#64748B", borderColor: "#E2E8F0" }}
-      >
-        {title}
-      </div>
-      <div className="space-y-3">{children}</div>
-    </div>
-  )
-}
-
-// Money formatting helper for BRL
-function formatMoneyBRL(value) {
-  if (value === null || value === undefined || value === "") return "R$ 0,00"
-  if (typeof value === "number") {
-    return value.toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    })
-  }
-  const digits = String(value).replace(/\D/g, "")
-  if (!digits) return "R$ 0,00"
-  const num = Number(digits) / 100
-  return num.toLocaleString("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  })
-}
-
-// Money input component for BRL
-function MoneyField({
-  label,
-  value,
-  onChange,
-  placeholder = "R$ 0,00",
-  required = false,
-}) {
+function MoneyField({ label, value, onChange, placeholder = "R$ 0,00", required = false }) {
   const displayValue = formatMoneyBRL(value)
 
   function handleChange(e) {
@@ -239,20 +70,12 @@ function MoneyField({
       onChange("R$ 0,00")
       return
     }
-    const num = Number(raw) / 100
-    const formatted = num.toLocaleString("pt-BR", {
-      style: "currency",
-      currency: "BRL",
-    })
-    onChange(formatted)
+    onChange((Number(raw) / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" }))
   }
 
   return (
     <div>
-      <label
-        className="text-xs font-medium block mb-1.5"
-        style={{ color: "#64748B" }}
-      >
+      <label className="text-xs font-medium block mb-1.5" style={{ color: "#64748B" }}>
         {label} {required && <span className="text-red-500">*</span>}
       </label>
       <input
@@ -263,479 +86,490 @@ function MoneyField({
         placeholder={placeholder}
         className="w-full text-sm font-semibold border rounded-lg px-3 py-2 outline-none transition-all"
         style={{ borderColor: "#E2E8F0", color: "#1E293B", background: "#fff" }}
-        onFocus={(e) => {
-          e.target.style.borderColor = "#0066CC"
-          e.target.style.boxShadow = "0 0 0 3px rgba(0,102,204,0.1)"
-        }}
-        onBlur={(e) => {
-          e.target.style.borderColor = "#E2E8F0"
-          e.target.style.boxShadow = "none"
-        }}
       />
     </div>
   )
 }
 
-// Autocomplete com busca para vincular transportadoras cadastradas
-function TransportadorasSelector({
-  selected = [],
-  onAdd,
-  onRemove,
-  allOptions = [],
+// 🏛️ Gestão de Matriz e Filiais (Funciona para cliente novo ou existente)
+function EmpresasSection({
+  clienteId,
+  empresas = [],
+  onChange,
+  onPersistAdd,
+  onPersistUpdate,
+  onPersistDelete,
+  onPersistSetMatriz,
 }) {
-  const [query, setQuery] = useState("")
-  const [isOpen, setIsOpen] = useState(false)
-  const containerRef = useRef(null)
+  const [novoCnpj, setNovoCnpj] = useState("")
+  const [novaRazao, setNovaRazao] = useState("")
+  const [novoFantasia, setNovoFantasia] = useState("")
+  const [novaIsMatriz, setNovaIsMatriz] = useState(false)
+  const [salvando, setSalvando] = useState(false)
 
-  useEffect(() => {
-    function handleClickOutside(e) {
-      if (containerRef.current && !containerRef.current.contains(e.target)) {
-        setIsOpen(false)
-      }
-    }
-    document.addEventListener("mousedown", handleClickOutside)
-    return () => document.removeEventListener("mousedown", handleClickOutside)
-  }, [])
+  const [empresaEmEdicao, setEmpresaEmEdicao] = useState(null)
+  const [salvandoEdicao, setSalvandoEdicao] = useState(false)
 
-  // Filtra as opções cadastradas que ainda não foram vinculadas
-  const available = allOptions.filter((opt) => {
-    const isAlreadySelected = (selected || []).includes(opt)
-    if (isAlreadySelected) return false
-    if (!query.trim()) return true
-    return opt.toLowerCase().includes(query.toLowerCase().trim())
-  })
+  async function handleAdd() {
+    const cnpjNumeros = novoCnpj.replace(/\D/g, "")
+    const razaoSocial = novaRazao.trim()
+    const nomeFantasia = novoFantasia.trim() || razaoSocial
 
-  function handleAdd(itemToAdd) {
-    const target = (itemToAdd || query).trim()
-    if (!target) return
-    const matched =
-      available.find((t) => t.toLowerCase() === target.toLowerCase()) ||
-      (available.length > 0 && !itemToAdd ? available[0] : target)
-
-    if (matched && !(selected || []).includes(matched)) {
-      onAdd(matched)
-      setQuery("")
-      setIsOpen(false)
-    }
-  }
-
-  return (
-    <div className="space-y-3" ref={containerRef}>
-      {/* Campo de busca com autocomplete e botão adicionar */}
-      <div>
-        <label
-          className="text-xs font-medium block mb-1.5"
-          style={{ color: "#64748B" }}
-        >
-          Adicionar Transportadora Homologada
-        </label>
-        <div className="flex items-center gap-2">
-          <div className="relative flex-1">
-            <div
-              className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-              style={{ color: "#94A3B8" }}
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <circle cx="11" cy="11" r="8" />
-                <path d="m21 21-4.35-4.35" />
-              </svg>
-            </div>
-            <input
-              type="text"
-              value={query}
-              onChange={(e) => {
-                setQuery(e.target.value)
-                setIsOpen(true)
-              }}
-              onFocus={() => setIsOpen(true)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault()
-                  handleAdd()
-                }
-                if (e.key === "Escape") {
-                  setIsOpen(false)
-                }
-              }}
-              placeholder="Digite para buscar transportadora..."
-              className="w-full text-xs pl-9 pr-8 py-2 border rounded-lg outline-none transition-all"
-              style={{
-                borderColor: "#E2E8F0",
-                color: "#1E293B",
-                background: "#fff",
-              }}
-              onFocusCapture={(e) => {
-                e.target.style.borderColor = "#0066CC"
-                e.target.style.boxShadow = "0 0 0 2px rgba(0,102,204,0.1)"
-              }}
-              onBlurCapture={(e) => {
-                e.target.style.borderColor = "#E2E8F0"
-                e.target.style.boxShadow = "none"
-              }}
-            />
-            {/* Botão para abrir o catálogo */}
-            <button
-              type="button"
-              onClick={() => setIsOpen(!isOpen)}
-              className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-[#94A3B8] hover:text-[#1E293B] cursor-pointer"
-              title="Abrir catálogo de transportadoras cadastradas"
-            >
-              <svg
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-                className={`transition-transform duration-200 ${
-                  isOpen ? "rotate-180" : ""
-                }`}
-              >
-                <path d="M6 9l6 6 6-6" />
-              </svg>
-            </button>
-
-            {/* Menu Dropdown com autocomplete */}
-            {isOpen && (
-              <div
-                className="absolute left-0 right-0 top-full mt-1.5 z-50 bg-white border rounded-xl shadow-xl max-h-52 overflow-y-auto"
-                style={{ borderColor: "#E2E8F0" }}
-              >
-                <div
-                  className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wider border-b bg-[#F8FAFC]"
-                  style={{ color: "#64748B", borderColor: "#F1F5F9" }}
-                >
-                  Transportadoras Cadastradas ({available.length})
-                </div>
-                {available.length === 0 ? (
-                  <div className="p-3 text-xs text-center text-[#94A3B8]">
-                    {query.trim()
-                      ? `Nenhuma transportadora encontrada para "${query}"`
-                      : "Todas as transportadoras cadastradas já estão vinculadas a este cliente."}
-                  </div>
-                ) : (
-                  <div className="py-1">
-                    {available.map((t) => (
-                      <button
-                        key={t}
-                        type="button"
-                        onClick={() => handleAdd(t)}
-                        className="w-full flex items-center justify-between px-3 py-2 text-xs text-left hover:bg-[#F1F5F9] transition-colors cursor-pointer"
-                        style={{ color: "#1E293B" }}
-                      >
-                        <span className="flex items-center gap-2">
-                          <svg
-                            width="13"
-                            height="13"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="#0066CC"
-                            strokeWidth="2"
-                          >
-                            <rect x="1" y="3" width="15" height="13" rx="2" />
-                            <polygon points="16 8 20 8 23 11 23 16 16 16 16 8" />
-                            <circle cx="5.5" cy="18.5" r="2.5" />
-                            <circle cx="18.5" cy="18.5" r="2.5" />
-                          </svg>
-                          <span className="font-medium">{t}</span>
-                        </span>
-                        <span className="text-[11px] font-semibold text-[#0066CC]">
-                          + Vincular
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          <button
-            type="button"
-            onClick={() => handleAdd()}
-            disabled={!query.trim() && available.length === 0}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-lg text-xs font-semibold text-white transition-all shadow-2xs disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex-shrink-0"
-            style={{ background: "#0066CC" }}
-            onMouseEnter={(e) => {
-              if (!e.currentTarget.disabled)
-                e.currentTarget.style.background = "#0054a8"
-            }}
-            onMouseLeave={(e) => {
-              if (!e.currentTarget.disabled)
-                e.currentTarget.style.background = "#0066CC"
-            }}
-          >
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="3"
-            >
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            Adicionar
-          </button>
-        </div>
-      </div>
-
-      {/* Exibição apenas das transportadoras vinculadas */}
-      <div>
-        <div className="flex items-center justify-between mb-1.5">
-          <span className="text-xs font-semibold text-[#64748B]">
-            Transportadoras vinculadas ({selected.length})
-          </span>
-        </div>
-
-        {selected.length === 0 ? (
-          <div
-            className="text-xs text-[#94A3B8] italic p-3 rounded-lg border border-dashed text-center bg-[#F8FAFC]"
-            style={{ borderColor: "#CBD5E1" }}
-          >
-            Nenhuma transportadora vinculada ao cliente no momento.
-          </div>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {selected.map((tName) => (
-              <span
-                key={tName}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border shadow-2xs transition-all"
-                style={{
-                  background: "#EBF4FF",
-                  borderColor: "#BFDBFE",
-                  color: "#0066CC",
-                }}
-              >
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <rect x="1" y="3" width="15" height="13" rx="2" />
-                  <polygon points="16 8 20 8 23 11 23 16 16 16 16 8" />
-                  <circle cx="5.5" cy="18.5" r="2.5" />
-                  <circle cx="18.5" cy="18.5" r="2.5" />
-                </svg>
-                <span>{tName}</span>
-                <button
-                  type="button"
-                  onClick={() => onRemove(tName)}
-                  className="ml-0.5 p-0.5 rounded hover:bg-blue-200 text-blue-700 hover:text-red-600 transition-colors cursor-pointer"
-                  title={`Desvincular ${tName}`}
-                >
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                  >
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
-// Seção dinâmica de Parceiros / Integrações (ERPs, WMS, TMS, etc.)
-function ParceirosSection({ parceiros = [], onChange }) {
-  const [tagInput, setTagInput] = useState("")
-  const items = Array.isArray(parceiros) ? parceiros : []
-
-  function handleAddTag() {
-    const trimmed = tagInput.trim()
-    if (!trimmed) return
-    if (items.some((p) => p.toLowerCase() === trimmed.toLowerCase())) {
-      setTagInput("")
+    if (!cnpjNumeros || cnpjNumeros.length !== 14) {
+      alert("O CNPJ deve conter exatamente 14 dígitos numéricos.")
       return
     }
-    onChange([...items, trimmed])
-    setTagInput("")
-  }
 
-  function handleKeyDown(e) {
-    if (e.key === "Enter") {
-      e.preventDefault()
-      handleAddTag()
+    if (!razaoSocial) {
+      alert("Informe a Razão Social da empresa.")
+      return
     }
+
+    if (empresas.some((e) => e.cnpj.replace(/\D/g, "") === cnpjNumeros)) {
+      alert("Já existe uma filial com este CNPJ nesta conta.")
+      return
+    }
+
+    if (clienteId && onPersistAdd) {
+      try {
+        setSalvando(true)
+        await onPersistAdd({
+          cliente_id: clienteId,
+          cnpj: maskCNPJ(novoCnpj),
+          razaoSocial,
+          nomeFantasia,
+          is_matriz: novaIsMatriz || empresas.length === 0,
+          status: "A",
+        })
+        setNovoCnpj("")
+        setNovaRazao("")
+        setNovoFantasia("")
+        setNovaIsMatriz(false)
+      } catch (err) {
+        alert(err.message || "Erro ao adicionar filial.")
+      } finally {
+        setSalvando(false)
+      }
+      return
+    }
+
+    let atualizadas = [...empresas]
+    const definirMatriz = novaIsMatriz || atualizadas.length === 0
+    if (definirMatriz) {
+      atualizadas = atualizadas.map((e) => ({ ...e, is_matriz: false }))
+    }
+
+    atualizadas.push({
+      id: Date.now() + Math.random(),
+      cnpj: maskCNPJ(novoCnpj),
+      razaoSocial,
+      nomeFantasia,
+      is_matriz: definirMatriz,
+      status: "A",
+    })
+
+    onChange(atualizadas)
+    setNovoCnpj("")
+    setNovaRazao("")
+    setNovoFantasia("")
+    setNovaIsMatriz(false)
   }
 
-  function handleRemove(tagToRemove) {
-    onChange(items.filter((p) => p !== tagToRemove))
+  async function handleSalvarEdicao() {
+    if (!empresaEmEdicao) return
+    const cnpjNumeros = empresaEmEdicao.cnpj.replace(/\D/g, "")
+    if (!cnpjNumeros || cnpjNumeros.length !== 14) {
+      alert("O CNPJ deve conter 14 números.")
+      return
+    }
+    if (!empresaEmEdicao.razaoSocial.trim()) {
+      alert("A Razão Social é obrigatória.")
+      return
+    }
+
+    if (clienteId && onPersistUpdate) {
+      try {
+        setSalvandoEdicao(true)
+        await onPersistUpdate(empresaEmEdicao.id, {
+          cnpj: maskCNPJ(empresaEmEdicao.cnpj),
+          razaoSocial: empresaEmEdicao.razaoSocial,
+          nomeFantasia: empresaEmEdicao.nomeFantasia,
+          status: empresaEmEdicao.status,
+          is_matriz: empresaEmEdicao.is_matriz,
+        })
+        setEmpresaEmEdicao(null)
+      } catch (err) {
+        alert(err.message || "Erro ao atualizar filial.")
+      } finally {
+        setSalvandoEdicao(false)
+      }
+      return
+    }
+
+    const atualizadas = empresas.map((e) => {
+      if (e.id === empresaEmEdicao.id) {
+        return { ...empresaEmEdicao, cnpj: maskCNPJ(empresaEmEdicao.cnpj) }
+      }
+      if (empresaEmEdicao.is_matriz) {
+        return { ...e, is_matriz: false }
+      }
+      return e
+    })
+
+    onChange(atualizadas)
+    setEmpresaEmEdicao(null)
+  }
+
+  async function handleTornarMatriz(emp) {
+    if (clienteId && onPersistSetMatriz) {
+      await onPersistSetMatriz(emp.id)
+      return
+    }
+    const atualizadas = empresas.map((e) => ({
+      ...e,
+      is_matriz: e.id === emp.id,
+    }))
+    onChange(atualizadas)
+  }
+
+  async function handleRemover(emp) {
+    if (emp.is_matriz && empresas.length > 1) {
+      alert("Esta empresa é a Matriz. Defina outra filial como Matriz antes de excluí-la.")
+      return
+    }
+
+    if (!window.confirm(`Deseja remover a filial "${emp.razaoSocial}"?`)) return
+
+    if (clienteId && onPersistDelete) {
+      await onPersistDelete(emp.id, emp.razaoSocial, emp.is_matriz)
+      return
+    }
+
+    onChange(empresas.filter((e) => e.id !== emp.id))
   }
 
   return (
-    <div>
-      <div
-        className="flex items-center justify-between pb-2 mb-3 border-b"
-        style={{ borderColor: "#E2E8F0" }}
-      >
+    <div className="space-y-5">
+      <div className="flex items-center justify-between pb-3 border-b" style={{ borderColor: "#E2E8F0" }}>
         <div>
-          <span
-            className="text-xs font-semibold uppercase tracking-wider block"
-            style={{ color: "#64748B" }}
-          >
-            4. Parceiros & Integrações Tecnológicas
-          </span>
-          <span className="text-[11px] text-[#94A3B8]">
-            ERPs, WMS, TMS ou parceiros de tecnologia do cliente
-          </span>
+          <h3 className="text-sm font-bold text-[#1E293B]">Estrutura Multi-CNPJ (Matriz & Filiais)</h3>
+          <p className="text-xs text-[#64748B]">
+            Cadastre a matriz e todas as filiais associadas a esta conta de cliente
+          </p>
         </div>
-        <span
-          className="text-xs font-medium px-2 py-0.5 rounded-full"
-          style={{ background: "#F1F5F9", color: "#64748B" }}
-        >
-          {items.length} {items.length === 1 ? "parceiro" : "parceiros"}
+        <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">
+          {empresas.length} {empresas.length === 1 ? "CNPJ cadastrado" : "CNPJs cadastrados"}
         </span>
       </div>
 
       <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <div className="relative flex-1">
-            <div
-              className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-              style={{ color: "#94A3B8" }}
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
-                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
-              </svg>
+        {empresas.map((emp) => (
+          <div
+            key={emp.id}
+            className="border rounded-xl bg-white shadow-2xs overflow-hidden transition-all"
+            style={{ borderColor: emp.is_matriz ? "#93C5FD" : "#E2E8F0" }}
+          >
+            <div className="flex items-center justify-between p-3.5 bg-white">
+              <div className="flex items-center gap-3 min-w-0">
+                <span
+                  className={`text-[11px] font-bold px-2.5 py-1 rounded-lg uppercase tracking-wide flex-shrink-0 ${
+                    emp.is_matriz
+                      ? "bg-blue-50 text-blue-700 border border-blue-200"
+                      : "bg-slate-100 text-slate-600 border border-slate-200"
+                  }`}
+                >
+                  {emp.is_matriz ? "⭐ Matriz" : "Filial"}
+                </span>
+
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-[#1E293B] truncate">
+                    {emp.razaoSocial}{" "}
+                    {emp.nomeFantasia && emp.nomeFantasia !== emp.razaoSocial && (
+                      <span className="text-xs text-[#64748B] font-normal">({emp.nomeFantasia})</span>
+                    )}
+                  </div>
+                  <div className="text-xs font-mono text-[#64748B] flex items-center gap-2">
+                    <span>CNPJ: {maskCNPJ(emp.cnpj)}</span>
+                    <span>•</span>
+                    <span className={emp.status === "A" ? "text-emerald-600 font-semibold" : "text-rose-600"}>
+                      {emp.status === "A" ? "Ativa" : "Inativa"}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 flex-shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setEmpresaEmEdicao(empresaEmEdicao?.id === emp.id ? null : { ...emp })}
+                  className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 cursor-pointer"
+                >
+                  {empresaEmEdicao?.id === emp.id ? "Fechar Edição" : "Ver / Editar"}
+                </button>
+
+                {!emp.is_matriz && (
+                  <button
+                    type="button"
+                    onClick={() => handleTornarMatriz(emp)}
+                    className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-blue-200 text-[#0066CC] hover:bg-blue-50 cursor-pointer"
+                  >
+                    Tornar Matriz
+                  </button>
+                )}
+
+                <button
+                  type="button"
+                  onClick={() => handleRemover(emp)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
+                  title="Remover filial"
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                  </svg>
+                </button>
+              </div>
             </div>
-            <input
-              type="text"
-              value={tagInput}
-              onChange={(e) => setTagInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Digite a integração/parceiro (ex: SAP, TOTVS, Bling, Senior WMS) e tecle Enter..."
-              className="w-full text-xs pl-9 pr-3 py-2 border rounded-lg outline-none transition-all"
-              style={{
-                borderColor: "#E2E8F0",
-                color: "#1E293B",
-                background: "#fff",
-              }}
-              onFocus={(e) => {
-                e.target.style.borderColor = "#0066CC"
-                e.target.style.boxShadow = "0 0 0 2px rgba(0,102,204,0.1)"
-              }}
-              onBlur={(e) => {
-                e.target.style.borderColor = "#E2E8F0"
-                e.target.style.boxShadow = "none"
-              }}
-            />
+
+            {empresaEmEdicao?.id === emp.id && (
+              <div className="p-4 bg-[#F8FAFC] border-t space-y-3" style={{ borderColor: "#E2E8F0" }}>
+                <div className="text-xs font-bold text-[#334155] uppercase tracking-wide">
+                  Editar Dados do CNPJ ({emp.is_matriz ? "Matriz" : "Filial"})
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-xs font-medium block mb-1 text-slate-600">CNPJ</label>
+                    <input
+                      type="text"
+                      value={empresaEmEdicao.cnpj}
+                      onChange={(e) => setEmpresaEmEdicao({ ...empresaEmEdicao, cnpj: maskCNPJ(e.target.value) })}
+                      className="w-full text-xs border rounded-lg px-3 py-2 bg-white font-mono"
+                      style={{ borderColor: "#CBD5E1" }}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium block mb-1 text-slate-600">Razão Social</label>
+                    <input
+                      type="text"
+                      value={empresaEmEdicao.razaoSocial}
+                      onChange={(e) => setEmpresaEmEdicao({ ...empresaEmEdicao, razaoSocial: e.target.value })}
+                      className="w-full text-xs border rounded-lg px-3 py-2 bg-white"
+                      style={{ borderColor: "#CBD5E1" }}
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium block mb-1 text-slate-600">Nome Fantasia</label>
+                    <input
+                      type="text"
+                      value={empresaEmEdicao.nomeFantasia || ""}
+                      onChange={(e) => setEmpresaEmEdicao({ ...empresaEmEdicao, nomeFantasia: e.target.value })}
+                      className="w-full text-xs border rounded-lg px-3 py-2 bg-white"
+                      style={{ borderColor: "#CBD5E1" }}
+                    />
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between pt-2">
+                  <div className="flex items-center gap-4">
+                    <label className="flex items-center gap-2 text-xs font-medium text-slate-700">
+                      Status:
+                      <select
+                        value={empresaEmEdicao.status || "A"}
+                        onChange={(e) => setEmpresaEmEdicao({ ...empresaEmEdicao, status: e.target.value })}
+                        className="text-xs border rounded-md px-2 py-1 bg-white"
+                        style={{ borderColor: "#CBD5E1" }}
+                      >
+                        <option value="A">Ativa</option>
+                        <option value="I">Inativa</option>
+                      </select>
+                    </label>
+
+                    <label className="flex items-center gap-2 text-xs text-slate-700 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(empresaEmEdicao.is_matriz)}
+                        onChange={(e) => setEmpresaEmEdicao({ ...empresaEmEdicao, is_matriz: e.target.checked })}
+                      />
+                      Marcar como Matriz
+                    </label>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEmpresaEmEdicao(null)}
+                      className="px-3 py-1.5 text-xs rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-100 cursor-pointer"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      type="button"
+                      onClick={handleSalvarEdicao}
+                      disabled={salvandoEdicao}
+                      className="px-4 py-1.5 text-xs font-semibold rounded-lg text-white cursor-pointer shadow-xs disabled:opacity-50"
+                      style={{ background: "#0066CC" }}
+                    >
+                      {salvandoEdicao ? "Salvando..." : "Salvar Alterações"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
+        ))}
+
+        {empresas.length === 0 && (
+          <div className="p-6 rounded-xl border border-dashed text-center bg-[#F8FAFC]" style={{ borderColor: "#CBD5E1" }}>
+            <p className="text-xs text-[#94A3B8]">
+              Nenhum CNPJ cadastrado. Cadastre a Matriz no formulário abaixo para continuar.
+            </p>
+          </div>
+        )}
+      </div>
+
+      <div className="p-4 bg-[#F8FAFC] rounded-xl border space-y-3" style={{ borderColor: "#E2E8F0" }}>
+        <div className="text-xs font-bold text-[#475569] uppercase tracking-wide">
+          + Cadastrar Novo CNPJ / Filial
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <input
+            type="text"
+            placeholder="CNPJ (apenas números)"
+            value={novoCnpj}
+            onChange={(e) => setNovoCnpj(maskCNPJ(e.target.value))}
+            className="text-xs border rounded-lg px-3 py-2 outline-none bg-white font-mono"
+            style={{ borderColor: "#CBD5E1" }}
+          />
+          <input
+            type="text"
+            placeholder="Razão Social"
+            value={novaRazao}
+            onChange={(e) => setNovaRazao(e.target.value)}
+            className="text-xs border rounded-lg px-3 py-2 outline-none bg-white"
+            style={{ borderColor: "#CBD5E1" }}
+          />
+          <input
+            type="text"
+            placeholder="Nome Fantasia (opcional)"
+            value={novoFantasia}
+            onChange={(e) => setNovoFantasia(e.target.value)}
+            className="text-xs border rounded-lg px-3 py-2 outline-none bg-white"
+            style={{ borderColor: "#CBD5E1" }}
+          />
+        </div>
+
+        <div className="flex items-center justify-between pt-1">
+          <label className="flex items-center gap-2 text-xs text-[#475569] cursor-pointer">
+            <input
+              type="checkbox"
+              checked={novaIsMatriz}
+              onChange={(e) => setNovaIsMatriz(e.target.checked)}
+              className="rounded"
+            />
+            Marcar como Matriz da conta
+          </label>
 
           <button
             type="button"
-            onClick={handleAddTag}
-            disabled={!tagInput.trim()}
-            className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold text-white transition-all disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer flex-shrink-0"
+            onClick={handleAdd}
+            disabled={salvando}
+            className="px-4 py-2 rounded-lg text-xs font-semibold text-white cursor-pointer shadow-xs disabled:opacity-50"
             style={{ background: "#0066CC" }}
-            onMouseEnter={(e) => {
-              if (!e.currentTarget.disabled)
-                e.currentTarget.style.background = "#0054a8"
-            }}
-            onMouseLeave={(e) => {
-              if (!e.currentTarget.disabled)
-                e.currentTarget.style.background = "#0066CC"
-            }}
           >
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="3"
-            >
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            Adicionar
+            {salvando ? "Salvando..." : "Adicionar CNPJ / Filial"}
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
 
-        {/* Badges / Tags list */}
-        {items.length === 0 ? (
-          <div
-            className="p-3.5 rounded-lg border border-dashed text-center bg-[#F8FAFC]"
-            style={{ borderColor: "#CBD5E1" }}
-          >
-            <p className="text-xs text-[#94A3B8]">
-              Nenhum parceiro ou integração cadastrado. Digite o nome acima e
-              pressione Enter ou clique em Adicionar.
-            </p>
-          </div>
-        ) : (
-          <div className="flex flex-wrap gap-2 pt-0.5">
-            {items.map((partner) => (
-              <span
-                key={partner}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border shadow-2xs transition-all"
-                style={{
-                  background: "#F5F3FF",
-                  borderColor: "#DDD6FE",
-                  color: "#6D28D9",
-                }}
-              >
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                >
-                  <polygon points="12 2 2 7 12 12 22 7 12 2" />
-                  <polyline points="2 17 12 22 22 17" />
-                  <polyline points="2 12 12 17 22 12" />
-                </svg>
-                <span className="font-semibold">{partner}</span>
-                <button
-                  type="button"
-                  onClick={() => handleRemove(partner)}
-                  className="ml-0.5 p-0.5 rounded hover:bg-purple-200 text-purple-700 hover:text-red-600 transition-colors cursor-pointer"
-                  title={`Remover ${partner}`}
-                >
-                  <svg
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2.5"
-                  >
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                </button>
-              </span>
+// 🚚 Seleção das Transportadoras cadastradas da tabela `transportadora`
+function TransportadorasSelector({ disponiveis = [], selecionadas = [], aoAlterar }) {
+  const [selecionadaId, setSelecionadaId] = useState("")
+
+  function handleVincular() {
+    if (!selecionadaId) return
+    const idNum = Number(selecionadaId)
+    if (selecionadas.some((t) => t.id === idNum)) return
+    const transpObj = disponiveis.find((t) => t.id === idNum)
+    if (transpObj) {
+      aoAlterar([...selecionadas, transpObj])
+      setSelecionadaId("")
+    }
+  }
+
+  function handleDesvincular(id) {
+    aoAlterar(selecionadas.filter((t) => t.id !== id))
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between pb-3 border-b" style={{ borderColor: "#E2E8F0" }}>
+        <div>
+          <h3 className="text-sm font-bold text-[#1E293B]">Transportadoras Homologadas</h3>
+          <p className="text-xs text-[#64748B]">
+            Vincule as transportadoras ativas no sistema autorizadas a operar com este cliente
+          </p>
+        </div>
+        <span className="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">
+          {selecionadas.length} vinculada(s)
+        </span>
+      </div>
+
+      <div className="flex gap-2">
+        <select
+          value={selecionadaId}
+          onChange={(e) => setSelecionadaId(e.target.value)}
+          className="flex-1 text-xs border rounded-lg px-3 py-2 outline-none bg-white font-medium"
+          style={{ borderColor: "#E2E8F0", color: "#1E293B" }}
+        >
+          <option value="">Selecione uma transportadora cadastrada...</option>
+          {disponiveis
+            .filter((d) => !selecionadas.some((s) => s.id === d.id))
+            .map((t) => (
+              <option key={t.id} value={t.id}>
+                {t.nome} - CNPJ: {maskCNPJ(t.cnpj)}
+              </option>
             ))}
+        </select>
+        <button
+          type="button"
+          onClick={handleVincular}
+          disabled={!selecionadaId}
+          className="px-4 py-2 rounded-lg text-xs font-semibold text-white cursor-pointer disabled:opacity-50"
+          style={{ background: "#0066CC" }}
+        >
+          Vincular
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {selecionadas.map((t) => (
+          <div
+            key={t.id}
+            className="flex items-center justify-between p-3 rounded-xl border bg-white shadow-2xs"
+            style={{ borderColor: "#E2E8F0" }}
+          >
+            <div>
+              <div className="text-xs font-bold text-[#1E293B]">{t.nome}</div>
+              <div className="text-[11px] font-mono text-slate-500">CNPJ: {maskCNPJ(t.cnpj)}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleDesvincular(t.id)}
+              className="text-slate-400 hover:text-red-600 p-1 rounded-lg cursor-pointer"
+              title="Desvincular transportadora"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+
+        {selecionadas.length === 0 && (
+          <div className="col-span-full p-6 rounded-xl border border-dashed text-center bg-[#F8FAFC]" style={{ borderColor: "#CBD5E1" }}>
+            <p className="text-xs text-[#94A3B8]">Nenhuma transportadora homologada para este cliente.</p>
           </div>
         )}
       </div>
@@ -743,472 +577,160 @@ function ParceirosSection({ parceiros = [], onChange }) {
   )
 }
 
-// Seção de Anexos do Cliente (contratos, atas, termos, documentações de integração)
-function AnexosSection({ anexos = [], onChange }) {
-  const fileInputRef = useRef(null)
-  const items = Array.isArray(anexos) ? anexos : []
-
-  function formatBytes(bytes) {
-    if (!bytes || bytes === 0) return "0 Bytes"
-    const k = 1024
-    const sizes = ["Bytes", "KB", "MB", "GB"]
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i]
-  }
-
-  function handleFilesAdded(e) {
-    const files = Array.from(e.target.files || [])
-    if (files.length === 0) return
-
-    const newItems = files.map((file) => ({
-      id: Date.now() + Math.random(),
-      name: file.name,
-      size: formatBytes(file.size),
-      data: new Date().toISOString().slice(0, 10),
-    }))
-
-    onChange([...items, ...newItems])
-    if (fileInputRef.current) {
-      fileInputRef.current.value = ""
-    }
-  }
-
-  function removeAnexo(idOrIdx) {
-    onChange(
-      items.filter((item, idx) => item.id !== idOrIdx && idx !== idOrIdx),
-    )
-  }
-
-  return (
-    <div>
-      <div
-        className="flex items-center justify-between pb-2 mb-3 border-b"
-        style={{ borderColor: "#E2E8F0" }}
-      >
-        <div>
-          <span
-            className="text-xs font-semibold uppercase tracking-wider block"
-            style={{ color: "#64748B" }}
-          >
-            6. Anexos & Documentações
-          </span>
-          <span className="text-[11px] text-[#94A3B8]">
-            Contratos, atas, termos de adesão e documentações de integração
-          </span>
-        </div>
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer border"
-          style={{
-            borderColor: "#0066CC",
-            color: "#0066CC",
-            background: "#F8FAFC",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = "#EBF4FF"
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "#F8FAFC"
-          }}
-        >
-          <svg
-            width="13"
-            height="13"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2.5"
-          >
-            <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-          </svg>
-          Anexar Arquivos
-        </button>
-      </div>
-
-      {/* Hidden file input */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        onChange={handleFilesAdded}
-        className="hidden"
-      />
-
-      {/* Upload zone or list */}
-      {items.length === 0 ? (
-        <div
-          onClick={() => fileInputRef.current?.click()}
-          className="p-6 rounded-xl border border-dashed text-center bg-[#F8FAFC] hover:bg-[#F1F5F9] transition-all cursor-pointer group"
-          style={{ borderColor: "#CBD5E1" }}
-        >
-          <div
-            className="w-10 h-10 rounded-full mx-auto flex items-center justify-center mb-2 text-[#64748B] group-hover:text-[#0066CC] group-hover:scale-105 transition-all"
-            style={{ background: "#EEF2F6" }}
-          >
-            <svg
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="17 8 12 3 7 8" />
-              <line x1="12" y1="3" x2="12" y2="15" />
-            </svg>
-          </div>
-          <p className="text-xs font-semibold text-[#1E293B] mb-0.5">
-            Clique para selecionar arquivos do seu computador
-          </p>
-          <p className="text-[11px] text-[#94A3B8]">
-            PDF, DOCX, XLSX, TXT, PNG ou JPG (contratos, atas, termos assinados)
-          </p>
-        </div>
-      ) : (
-        <div className="space-y-2">
-          {items.map((anexo, idx) => (
-            <div
-              key={anexo.id || idx}
-              className="flex items-center justify-between p-2.5 rounded-xl border bg-white hover:border-[#CBD5E1] transition-all"
-              style={{ borderColor: "#E2E8F0" }}
-            >
-              <div className="flex items-center gap-3 min-w-0">
-                <div
-                  className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0"
-                  style={{ background: "#F1F5F9", color: "#0066CC" }}
-                >
-                  <svg
-                    width="16"
-                    height="16"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                    <polyline points="14 2 14 8 20 8" />
-                    <line x1="16" y1="13" x2="8" y2="13" />
-                    <line x1="16" y1="17" x2="8" y2="17" />
-                    <polyline points="10 9 9 9 8 9" />
-                  </svg>
-                </div>
-                <div className="min-w-0">
-                  <div
-                    className="text-xs font-semibold text-[#1E293B] truncate max-w-sm"
-                    title={anexo.name}
-                  >
-                    {anexo.name}
-                  </div>
-                  <div className="text-[11px] text-[#64748B]">
-                    {anexo.size}{" "}
-                    {anexo.data ? `• Adicionado em ${anexo.data}` : ""}
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-1.5 flex-shrink-0">
-                <button
-                  type="button"
-                  onClick={() => removeAnexo(anexo.id || idx)}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
-                  title="Remover arquivo anexo"
-                >
-                  <svg
-                    width="14"
-                    height="14"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <polyline points="3 6 5 6 21 6" />
-                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                    <line x1="10" y1="11" x2="10" y2="17" />
-                    <line x1="14" y1="11" x2="14" y2="17" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          ))}
-
-          <button
-            type="button"
-            onClick={() => fileInputRef.current?.click()}
-            className="w-full py-2 border border-dashed rounded-lg text-xs font-medium text-[#64748B] hover:text-[#0066CC] hover:bg-[#F8FAFC] transition-colors cursor-pointer flex items-center justify-center gap-1.5"
-            style={{ borderColor: "#CBD5E1" }}
-          >
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-            >
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            Anexar mais um arquivo
-          </button>
-        </div>
-      )}
-    </div>
-  )
-}
-
-// Seção dinâmica de contatos em pares [Nome] e [E-mail]
+// 👥 Gestão de Contatos Autorizados
 function ContatosSection({ contatos = [], onChange }) {
-  const items = Array.isArray(contatos) ? contatos : []
-
   function addContato() {
-    onChange([
-      ...items,
-      { id: Date.now() + Math.random(), nome: "", email: "" },
-    ])
+    onChange([...contatos, { id: Date.now() + Math.random(), nome: "", email: "" }])
   }
 
   function updateContato(idx, field, value) {
-    const updated = items.map((c, i) =>
-      i === idx ? { ...c, [field]: value } : c,
-    )
+    const updated = contatos.map((c, i) => (i === idx ? { ...c, [field]: value } : c))
     onChange(updated)
   }
 
   function removeContato(idx) {
-    const updated = items.filter((_, i) => i !== idx)
-    onChange(updated)
+    onChange(contatos.filter((_, i) => i !== idx))
   }
 
   return (
-    <div>
-      <div
-        className="flex items-center justify-between pb-2 mb-3 border-b"
-        style={{ borderColor: "#E2E8F0" }}
-      >
-        <div
-          className="text-xs font-semibold uppercase tracking-wider"
-          style={{ color: "#64748B" }}
-        >
-          5. Contatos & Canais Autorizados
+    <div className="space-y-4">
+      <div className="flex items-center justify-between pb-3 border-b" style={{ borderColor: "#E2E8F0" }}>
+        <div>
+          <h3 className="text-sm font-bold text-[#1E293B]">Contatos & Pessoas Autorizadas</h3>
+          <p className="text-xs text-[#64748B]">Contatos habilitados para abertura e acompanhamento de chamados</p>
         </div>
         <button
           type="button"
           onClick={addContato}
-          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer border"
-          style={{
-            borderColor: "#0066CC",
-            color: "#0066CC",
-            background: "#F8FAFC",
-          }}
-          onMouseEnter={(e) => {
-            e.currentTarget.style.background = "#EBF4FF"
-          }}
-          onMouseLeave={(e) => {
-            e.currentTarget.style.background = "#F8FAFC"
-          }}
+          className="px-3 py-1.5 rounded-lg text-xs font-semibold border bg-white text-[#0066CC] hover:bg-blue-50 cursor-pointer"
+          style={{ borderColor: "#0066CC" }}
         >
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="3"
-          >
-            <line x1="12" y1="5" x2="12" y2="19" />
-            <line x1="5" y1="12" x2="19" y2="12" />
-          </svg>
-          Adicionar Contato
+          + Adicionar Contato
         </button>
       </div>
 
-      {items.length === 0 ? (
-        <div
-          className="p-5 rounded-xl border border-dashed text-center bg-[#F8FAFC]"
-          style={{ borderColor: "#CBD5E1" }}
-        >
-          <p className="text-xs text-[#64748B] mb-2.5">
-            Nenhum contato autorizado cadastrado para este cliente.
-          </p>
-          <button
-            type="button"
-            onClick={addContato}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-white shadow-xs cursor-pointer"
-            style={{ background: "#0066CC" }}
+      <div className="space-y-2.5">
+        {contatos.map((c, idx) => (
+          <div
+            key={c.id || idx}
+            className="grid grid-cols-[1fr_1fr_40px] gap-2 items-center p-2 rounded-xl border bg-white"
+            style={{ borderColor: "#E2E8F0" }}
           >
-            <svg
-              width="12"
-              height="12"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-            >
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            Adicionar Primeiro Contato
-          </button>
-        </div>
-      ) : (
-        <div className="space-y-2.5">
-          <div className="grid grid-cols-[1fr_1fr_40px] gap-2 px-1 text-[11px] font-semibold uppercase tracking-wider text-[#64748B]">
-            <div>Nome do Contato</div>
-            <div>E-mail Autorizado</div>
-            <div></div>
-          </div>
-          {items.map((contato, idx) => (
-            <div
-              key={contato.id || idx}
-              className="grid grid-cols-[1fr_1fr_40px] gap-2 items-center p-2 rounded-xl border bg-white transition-all hover:border-[#CBD5E1]"
+            <input
+              type="text"
+              value={c.nome || ""}
+              onChange={(e) => updateContato(idx, "nome", e.target.value)}
+              placeholder="Nome do contato (ex: João Silva)"
+              className="w-full text-xs border rounded-lg px-3 py-2 outline-none bg-white"
               style={{ borderColor: "#E2E8F0" }}
+            />
+            <input
+              type="email"
+              value={c.email || ""}
+              onChange={(e) => updateContato(idx, "email", e.target.value)}
+              placeholder="E-mail (ex: joao@empresa.com.br)"
+              className="w-full text-xs border rounded-lg px-3 py-2 outline-none bg-white"
+              style={{ borderColor: "#E2E8F0" }}
+            />
+            <button
+              type="button"
+              onClick={() => removeContato(idx)}
+              className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg cursor-pointer"
+              title="Remover contato"
             >
-              <div>
-                <input
-                  type="text"
-                  value={contato.nome || ""}
-                  onChange={(e) => updateContato(idx, "nome", e.target.value)}
-                  placeholder="Nome (ex: Carlos Silva)"
-                  className="w-full text-xs border rounded-lg px-3 py-2 outline-none transition-all"
-                  style={{
-                    borderColor: "#E2E8F0",
-                    color: "#1E293B",
-                    background: "#fff",
-                  }}
-                  onFocus={(e) => {
-                    e.target.style.borderColor = "#0066CC"
-                    e.target.style.boxShadow = "0 0 0 2px rgba(0,102,204,0.1)"
-                  }}
-                  onBlur={(e) => {
-                    e.target.style.borderColor = "#E2E8F0"
-                    e.target.style.boxShadow = "none"
-                  }}
-                />
-              </div>
-              <div>
-                <input
-                  type="email"
-                  value={contato.email || ""}
-                  onChange={(e) => updateContato(idx, "email", e.target.value)}
-                  placeholder="E-mail (ex: carlos@empresa.com.br)"
-                  className="w-full text-xs border rounded-lg px-3 py-2 outline-none transition-all"
-                  style={{
-                    borderColor: "#E2E8F0",
-                    color: "#1E293B",
-                    background: "#fff",
-                  }}
-                  onFocus={(e) => {
-                    e.target.style.borderColor = "#0066CC"
-                    e.target.style.boxShadow = "0 0 0 2px rgba(0,102,204,0.1)"
-                  }}
-                  onBlur={(e) => {
-                    e.target.style.borderColor = "#E2E8F0"
-                    e.target.style.boxShadow = "none"
-                  }}
-                />
-              </div>
-              <div className="flex items-center justify-center">
-                <button
-                  type="button"
-                  onClick={() => removeContato(idx)}
-                  className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 transition-colors cursor-pointer"
-                  title="Remover este contato"
-                >
-                  <svg
-                    width="15"
-                    height="15"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                  >
-                    <polyline points="3 6 5 6 21 6" />
-                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
-                    <line x1="10" y1="11" x2="10" y2="17" />
-                    <line x1="14" y1="11" x2="14" y2="17" />
-                  </svg>
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+              ✕
+            </button>
+          </div>
+        ))}
+
+        {contatos.length === 0 && (
+          <div className="p-6 rounded-xl border border-dashed text-center bg-[#F8FAFC]" style={{ borderColor: "#CBD5E1" }}>
+            <p className="text-xs text-slate-400">Nenhum contato cadastrado.</p>
+          </div>
+        )}
+      </div>
     </div>
   )
 }
 
-// Modal da Ficha Completa do Cliente
+// 🗂️ Modal Unificado (Usado tanto para NOVO CLIENTE quanto para EDITAR / VER FICHA)
 function FichaClienteModal({
   client,
+  isNovo = false,
   onClose,
   onSave,
-  planOptions,
-  allTransportadoras,
+  planosList = [],
+  transportadorasList = [],
+  onEmpresaAdded,
+  onEmpresaUpdated,
+  onEmpresaDeleted,
+  onEmpresaSetMatriz,
 }) {
+  const [activeTab, setActiveTab] = useState("dados")
   const [form, setForm] = useState({
-    id: client.id,
-    razaoSocial: client.razaoSocial || "",
-    nomeFantasia: client.nomeFantasia || "",
-    cnpj: client.cnpj || "",
-    dominio: client.dominio || "",
-    adminEmail: client.adminEmail || "",
-    filiais: client.filiais ?? "0",
-    contaFrete: client.contaFrete
-      ? formatMoneyBRL(client.contaFrete)
-      : "R$ 0,00",
-    transportadoras: client.transportadoras ? [...client.transportadoras] : [],
-    contrato: client.contrato || "",
-    dataFinalContrato: client.dataFinalContrato || "",
-    inicioImplantacao: client.inicioImplantacao || "",
-    dataFinalImplantacao: client.dataFinalImplantacao || "",
-    dataGoLive: client.dataGoLive || "",
-    parceiros: Array.isArray(client.parceiros) ? [...client.parceiros] : [],
-    anexos: Array.isArray(client.anexos) ? [...client.anexos] : [],
-    plano: client.plano || "Profissional",
-    status: client.status || "Ativo",
-    contatos: Array.isArray(client.contatos)
-      ? client.contatos.map((ct) => ({ ...ct }))
-      : client.emailsAutorizados
-        ? client.emailsAutorizados.split(",").map((em, idx) => ({
-            id: idx + 1,
-            nome: "",
-            email: em.trim(),
-          }))
-        : [],
+    id: client?.id || null,
+    nomeFantasia: client?.nomeFantasia || "",
+    emailAdm: client?.emailAdm || "",
+    dominio: client?.dominio || "",
+    integracao: client?.integracao || "",
+    dataAssContrato: client?.dataAssContrato || "",
+    dataFimContrato: client?.dataFimContrato || "",
+    dataIniImpl: client?.dataIniImpl || "",
+    dataFinImpl: client?.dataFinImpl || "",
+    valorContaFrete: client?.valorContaFrete ? formatMoneyBRL(client.valorContaFrete) : "R$ 0,00",
+    status: client?.status || "A",
+    plano_id: client?.plano_id || (planosList[0]?.id ?? ""),
+    transportadoras: Array.isArray(client?.transportadoras) ? client.transportadoras : [],
+    contatos: Array.isArray(client?.contatos) ? client.contatos : [],
+    empresas: Array.isArray(client?.empresas) ? client.empresas : [],
   })
+
+  useEffect(() => {
+    if (client) {
+      setForm({
+        id: client.id || null,
+        nomeFantasia: client.nomeFantasia || "",
+        emailAdm: client.emailAdm || "",
+        dominio: client.dominio || "",
+        integracao: client.integracao || "",
+        dataAssContrato: client.dataAssContrato || "",
+        dataFimContrato: client.dataFimContrato || "",
+        dataIniImpl: client.dataIniImpl || "",
+        dataFinImpl: client.dataFinImpl || "",
+        valorContaFrete: client.valorContaFrete ? formatMoneyBRL(client.valorContaFrete) : "R$ 0,00",
+        status: client.status || "A",
+        plano_id: client.plano_id || (planosList[0]?.id ?? ""),
+        transportadoras: Array.isArray(client.transportadoras) ? client.transportadoras : [],
+        contatos: Array.isArray(client.contatos) ? client.contatos : [],
+        empresas: Array.isArray(client.empresas) ? client.empresas : [],
+      })
+    }
+  }, [client, planosList])
 
   function update(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }))
   }
 
-  function handleAddTransportadora(tName) {
-    if (!tName) return
-    setForm((prev) => {
-      const current = prev.transportadoras || []
-      if (current.includes(tName)) return prev
-      return { ...prev, transportadoras: [...current, tName] }
-    })
-  }
+  const matriz = form.empresas.find((e) => e.is_matriz) || form.empresas[0] || {}
 
-  function handleRemoveTransportadora(tName) {
-    setForm((prev) => ({
-      ...prev,
-      transportadoras: (prev.transportadoras || []).filter((t) => t !== tName),
-    }))
-  }
+  function handleSalvarGeral() {
+    if (!form.nomeFantasia.trim()) {
+      alert("Informe o Nome Fantasia / Identificador do cliente.")
+      setActiveTab("dados")
+      return
+    }
 
-  function handleSave() {
+    if (form.empresas.length === 0) {
+      alert("É obrigatório cadastrar ao menos uma empresa (Matriz) na aba 'Multi-CNPJ & Filiais'.")
+      setActiveTab("empresas")
+      return
+    }
+
     onSave({
       ...form,
-      contaFrete: formatMoneyBRL(form.contaFrete),
+      valorContaFrete: parseMoneyToFloat(form.valorContaFrete),
     })
   }
-
-  const initials = (form.nomeFantasia || form.razaoSocial || "CL")
-    .slice(0, 2)
-    .toUpperCase()
 
   return (
     <div
@@ -1217,629 +739,234 @@ function FichaClienteModal({
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[90vh]"
+        className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[92vh]"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Header */}
-        <div
-          className="flex items-center justify-between px-6 py-4 border-b bg-white flex-shrink-0"
-          style={{ borderColor: "#E2E8F0" }}
-        >
+        {/* Cabeçalho */}
+        <div className="flex items-center justify-between px-6 py-4 border-b bg-white flex-shrink-0" style={{ borderColor: "#E2E8F0" }}>
           <div className="flex items-center gap-3">
             <button
               onClick={onClose}
-              className="flex items-center gap-1.5 text-xs font-medium px-2.5 py-1.5 rounded-lg border transition-colors hover:bg-[#F1F5F9] cursor-pointer"
-              style={{ borderColor: "#E2E8F0", color: "#64748B" }}
-              title="Voltar para a listagem"
+              className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border hover:bg-slate-50 cursor-pointer"
+              style={{ borderColor: "#CBD5E1", color: "#64748B" }}
             >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <path d="M15 18l-6-6 6-6" />
-              </svg>
-              Voltar
+              ← Voltar
             </button>
-            <div
-              className="w-10 h-10 rounded-xl flex items-center justify-center text-sm font-bold text-white flex-shrink-0"
-              style={{ background: "#0B2847" }}
-            >
-              {initials}
-            </div>
             <div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <h2
-                  className="text-base font-bold"
-                  style={{ color: "#1E293B" }}
-                >
-                  Ficha do Cliente: {form.nomeFantasia || form.razaoSocial}
-                </h2>
-                <span
-                  className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                  style={
-                    form.status === "Ativo"
-                      ? { background: "#ECFDF5", color: "#10B981" }
-                      : { background: "#F1F5F9", color: "#64748B" }
-                  }
-                >
-                  {form.status}
-                </span>
-                <span
-                  className="text-xs font-semibold px-2 py-0.5 rounded-full"
-                  style={
-                    PLAN_COLORS[form.plano] || {
-                      background: "#F1F5F9",
-                      color: "#64748B",
-                    }
-                  }
-                >
-                  {form.plano}
-                </span>
-              </div>
-              <div className="text-xs" style={{ color: "#64748B" }}>
-                {form.razaoSocial} · {form.dominio || "Sem domínio definido"}
+              <h2 className="text-base font-bold text-[#1E293B]">
+                {isNovo ? "Cadastrar Novo Cliente" : form.nomeFantasia || matriz.razaoSocial || "Ficha do Cliente"}
+              </h2>
+              <div className="text-xs text-[#64748B]">
+                Matriz: <strong>{matriz.razaoSocial || "Não configurada"}</strong> (
+                {matriz.cnpj ? maskCNPJ(matriz.cnpj) : "Sem CNPJ"})
               </div>
             </div>
           </div>
-
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-[#F1F5F9] transition-colors cursor-pointer"
-            title="Fechar ficha"
-          >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
+          <button onClick={onClose} className="p-2 text-slate-400 hover:text-slate-600 cursor-pointer text-sm">
+            ✕
           </button>
         </div>
 
-        {/* Scrollable Form Body */}
-        <div className="p-6 overflow-y-auto space-y-6 flex-1">
-          {/* Quick Highlights Bar */}
-          <div
-            className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 p-4 rounded-xl border bg-[#F8FAFC]"
-            style={{ borderColor: "#E2E8F0" }}
-          >
-            <div>
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-[#64748B] mb-0.5">
-                CNPJ Principal
-              </div>
-              <div className="text-xs font-mono font-medium text-[#1E293B] truncate">
-                {form.cnpj || "—"}
-              </div>
-            </div>
-            <div>
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-[#64748B] mb-0.5">
-                Domínio
-              </div>
-              <div className="text-xs font-medium text-[#0066CC] truncate">
-                {form.dominio || "—"}
-              </div>
-            </div>
-            <div>
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-[#64748B] mb-0.5">
-                Conta Frete
-              </div>
-              <div className="text-xs font-semibold text-[#1E293B]">
-                {formatMoneyBRL(form.contaFrete)}
-              </div>
-            </div>
-            <div>
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-[#64748B] mb-0.5">
-                Data Go-live
-              </div>
-              <div className="text-xs font-semibold text-[#F26522] flex items-center gap-1">
-                <span>🚀</span> {form.dataGoLive || "A definir"}
-              </div>
-            </div>
-            <div>
-              <div className="text-[11px] font-semibold uppercase tracking-wider text-[#64748B] mb-0.5">
-                Filiais Cadastradas
-              </div>
-              <div className="text-xs font-medium text-[#1E293B]">
-                {form.filiais === "—" ||
-                form.filiais === "0" ||
-                form.filiais === 0
-                  ? "Nenhuma filial"
-                  : `${form.filiais} filiais`}
-              </div>
-            </div>
-          </div>
-
-          {/* Section 1: Empresa */}
-          <ModalSection title="1. Identificação da Empresa">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <FormField
-                label="Razão Social"
-                value={form.razaoSocial}
-                onChange={(v) => update("razaoSocial", v)}
-                placeholder="Ex: Móveis Florense Ltda"
-              />
-              <FormField
-                label="Nome Fantasia"
-                value={form.nomeFantasia}
-                onChange={(v) => update("nomeFantasia", v)}
-                placeholder="Ex: Florense"
-              />
-              <FormField
-                label="CNPJ Principal"
-                value={form.cnpj}
-                onChange={(v) => update("cnpj", v)}
-                placeholder="00.000.000/0001-00"
-              />
-              <FormField
-                label="Domínio Corporativo"
-                value={form.dominio}
-                onChange={(v) => update("dominio", v)}
-                placeholder="empresa.fretegestao.com.br"
-              />
-              <FormField
-                label="Usuário Administrador (E-mail)"
-                value={form.adminEmail}
-                onChange={(v) => update("adminEmail", v)}
-                placeholder="admin@empresa.com.br"
-                type="email"
-              />
-              <FormField
-                label="Filiais (Quantidade ou CNPJs)"
-                value={form.filiais}
-                onChange={(v) => update("filiais", v)}
-                placeholder="Ex: 3"
-              />
-            </div>
-          </ModalSection>
-
-          {/* Section 2: Operação de Frete */}
-          <ModalSection title="2. Operação de Frete & Transportadoras">
-            <div className="space-y-4">
-              <div className="max-w-xs">
-                <MoneyField
-                  label="Conta Frete"
-                  value={form.contaFrete}
-                  onChange={(v) => update("contaFrete", v)}
-                  placeholder="R$ 0,00"
-                />
-              </div>
-
-              <TransportadorasSelector
-                selected={form.transportadoras}
-                onAdd={handleAddTransportadora}
-                onRemove={handleRemoveTransportadora}
-                allOptions={allTransportadoras}
-              />
-            </div>
-          </ModalSection>
-
-          {/* Section 3: Contrato, Marcos & Prazos */}
-          <ModalSection title="3. Contrato, Marcos & Prazos">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              <FormField
-                label="Data de Assinatura do Contrato"
-                value={form.contrato}
-                onChange={(v) => update("contrato", v)}
-                type="date"
-              />
-              <FormField
-                label="Data Final de Contrato"
-                value={form.dataFinalContrato}
-                onChange={(v) => update("dataFinalContrato", v)}
-                type="date"
-              />
-              <FormField
-                label="Data de Início da Implantação"
-                value={form.inicioImplantacao}
-                onChange={(v) => update("inicioImplantacao", v)}
-                type="date"
-              />
-              <FormField
-                label="Data Final de Implantação"
-                value={form.dataFinalImplantacao}
-                onChange={(v) => update("dataFinalImplantacao", v)}
-                type="date"
-              />
-              <div className="sm:col-span-2 lg:col-span-1">
-                <FormField
-                  label="Data Go-live (Virada de Chave)"
-                  value={form.dataGoLive}
-                  onChange={(v) => update("dataGoLive", v)}
-                  type="date"
-                />
-              </div>
-              <div>
-                <label
-                  className="text-xs font-medium block mb-1.5"
-                  style={{ color: "#64748B" }}
-                >
-                  Plano Contratado
-                </label>
-                <select
-                  className="w-full text-sm border rounded-lg px-3 py-2 outline-none bg-white font-medium cursor-pointer"
-                  value={form.plano}
-                  onChange={(e) => update("plano", e.target.value)}
-                  style={{ borderColor: "#E2E8F0", color: "#1E293B" }}
-                >
-                  {planOptions.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label
-                  className="text-xs font-medium block mb-1.5"
-                  style={{ color: "#64748B" }}
-                >
-                  Status Operacional
-                </label>
-                <select
-                  className="w-full text-sm border rounded-lg px-3 py-2 outline-none bg-white font-medium cursor-pointer"
-                  value={form.status}
-                  onChange={(e) => update("status", e.target.value)}
-                  style={{ borderColor: "#E2E8F0", color: "#1E293B" }}
-                >
-                  <option value="Ativo">Ativo</option>
-                  <option value="Inativo">Inativo</option>
-                </select>
-              </div>
-            </div>
-          </ModalSection>
-
-          {/* Section 4: Parceiros & Integrações */}
-          <ParceirosSection
-            parceiros={form.parceiros}
-            onChange={(newParceiros) => update("parceiros", newParceiros)}
-          />
-
-          {/* Section 5: Contatos Autorizados */}
-          <ContatosSection
-            contatos={form.contatos}
-            onChange={(newContatos) => update("contatos", newContatos)}
-          />
-
-          {/* Section 6: Anexos e Documentações */}
-          <AnexosSection
-            anexos={form.anexos}
-            onChange={(newAnexos) => update("anexos", newAnexos)}
-          />
+        {/* Abas */}
+        <div className="flex items-center gap-1 px-6 border-b bg-[#F8FAFC] flex-shrink-0" style={{ borderColor: "#E2E8F0" }}>
+          {[
+            { id: "dados", label: "🏢 Cadastro Geral & Contrato" },
+            { id: "empresas", label: `🏛️ Multi-CNPJ & Filiais (${form.empresas.length})` },
+            { id: "transportadoras", label: `🚚 Transportadoras (${form.transportadoras.length})` },
+            { id: "contatos", label: `👥 Contatos (${form.contatos.length})` },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-4 py-3 text-xs font-semibold border-b-2 transition-all cursor-pointer ${
+                activeTab === tab.id
+                  ? "border-[#0066CC] text-[#0066CC] bg-white"
+                  : "border-transparent text-[#64748B] hover:text-[#1E293B]"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
 
-        {/* Footer */}
-        <div
-          className="flex items-center justify-between px-6 py-4 border-t bg-[#F8FAFC] flex-shrink-0"
-          style={{ borderColor: "#E2E8F0" }}
-        >
+        {/* Conteúdo das Abas */}
+        <div className="p-6 overflow-y-auto flex-1 space-y-6">
+          {activeTab === "dados" && (
+            <div className="space-y-6">
+              <div>
+                <h3 className="text-sm font-bold mb-3 text-[#1E293B]">1. Informações Globais da Conta</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <FormField
+                    label="Nome Fantasia / Identificador"
+                    value={form.nomeFantasia}
+                    onChange={(v) => update("nomeFantasia", v)}
+                    placeholder="Ex: Florense"
+                    required
+                  />
+                  <FormField
+                    label="Domínio Web"
+                    value={form.dominio}
+                    onChange={(v) => update("dominio", v)}
+                    placeholder="florense.fretegestao.com.br"
+                  />
+                  <FormField
+                    label="E-mail Administrador"
+                    value={form.emailAdm}
+                    onChange={(v) => update("emailAdm", v)}
+                    placeholder="admin@empresa.com.br"
+                    type="email"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-sm font-bold mb-3 text-[#1E293B]">2. Plano & Faturamento</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-xs font-medium block mb-1.5" style={{ color: "#64748B" }}>
+                      Plano Contratado
+                    </label>
+                    <select
+                      className="w-full text-sm border rounded-lg px-3 py-2 outline-none bg-white font-medium cursor-pointer"
+                      style={{ borderColor: "#E2E8F0", color: "#1E293B" }}
+                      value={form.plano_id}
+                      onChange={(e) => update("plano_id", e.target.value)}
+                    >
+                      <option value="">Selecione um plano...</option>
+                      {planosList.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.nome} - {formatMoneyBRL(p.valor)}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium block mb-1.5" style={{ color: "#64748B" }}>
+                      Status da Conta
+                    </label>
+                    <select
+                      className="w-full text-sm border rounded-lg px-3 py-2 outline-none bg-white font-medium cursor-pointer"
+                      style={{ borderColor: "#E2E8F0", color: "#1E293B" }}
+                      value={form.status}
+                      onChange={(e) => update("status", e.target.value)}
+                    >
+                      <option value="A">Ativo</option>
+                      <option value="I">Inativo</option>
+                    </select>
+                  </div>
+                  <MoneyField
+                    label="Conta Frete Mensal"
+                    value={form.valorContaFrete}
+                    onChange={(v) => update("valorContaFrete", v)}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <h3 className="text-sm font-bold mb-3 text-[#1E293B]">3. Prazos e Cronograma</h3>
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                  <FormField
+                    label="Assinatura Contrato"
+                    type="date"
+                    value={form.dataAssContrato}
+                    onChange={(v) => update("dataAssContrato", v)}
+                  />
+                  <FormField
+                    label="Término Contrato"
+                    type="date"
+                    value={form.dataFimContrato}
+                    onChange={(v) => update("dataFimContrato", v)}
+                  />
+                  <FormField
+                    label="Início Implantação"
+                    type="date"
+                    value={form.dataIniImpl}
+                    onChange={(v) => update("dataIniImpl", v)}
+                  />
+                  <FormField
+                    label="Término Implantação"
+                    type="date"
+                    value={form.dataFinImpl}
+                    onChange={(v) => update("dataFinImpl", v)}
+                  />
+                </div>
+              </div>
+
+              {/* Campo de Integração do DER (VARCHAR 500) */}
+              <div>
+                <h3 className="text-sm font-bold mb-3 text-[#1E293B]">4. Integrações Técnicas & ERPs</h3>
+                <div>
+                  <label className="text-xs font-medium block mb-1.5" style={{ color: "#64748B" }}>
+                    Parâmetros de Integração / Sistemas (ERP, WMS, TMS, Webhook, API Externa)
+                  </label>
+                  <textarea
+                    rows={3}
+                    maxLength={500}
+                    value={form.integracao || ""}
+                    onChange={(e) => update("integracao", e.target.value)}
+                    placeholder="Ex: Integração nativa SAP via REST API. Endpoint: https://api.erp.empresa.com.br/v1. Chave de acesso e webhook de status ativo."
+                    className="w-full text-xs border rounded-lg p-3 outline-none transition-all resize-none"
+                    style={{ borderColor: "#E2E8F0", color: "#1E293B", background: "#fff" }}
+                    onFocus={(e) => {
+                      e.target.style.borderColor = "#0066CC"
+                      e.target.style.boxShadow = "0 0 0 3px rgba(0,102,204,0.1)"
+                    }}
+                    onBlur={(e) => {
+                      e.target.style.borderColor = "#E2E8F0"
+                      e.target.style.boxShadow = "none"
+                    }}
+                  />
+                  <div className="text-[11px] text-right text-slate-400 mt-1">
+                    {(form.integracao || "").length}/500 caracteres
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {activeTab === "empresas" && (
+            <EmpresasSection
+              clienteId={form.id}
+              empresas={form.empresas}
+              onChange={(novas) => update("empresas", novas)}
+              onPersistAdd={onEmpresaAdded}
+              onPersistUpdate={onEmpresaUpdated}
+              onPersistDelete={onEmpresaDeleted}
+              onPersistSetMatriz={onEmpresaSetMatriz}
+            />
+          )}
+
+          {activeTab === "transportadoras" && (
+            <TransportadorasSelector
+              disponiveis={transportadorasList}
+              selecionadas={form.transportadoras}
+              aoAlterar={(novas) => update("transportadoras", novas)}
+            />
+          )}
+
+          {activeTab === "contatos" && (
+            <ContatosSection
+              contatos={form.contatos}
+              onChange={(novos) => update("contatos", novos)}
+            />
+          )}
+        </div>
+
+        {/* Rodapé */}
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t bg-[#F8FAFC] flex-shrink-0" style={{ borderColor: "#E2E8F0" }}>
           <button
             onClick={onClose}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium border transition-colors hover:bg-white cursor-pointer"
+            className="px-4 py-2 rounded-lg text-sm font-medium border bg-white cursor-pointer"
             style={{ borderColor: "#CBD5E1", color: "#64748B" }}
-          >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <path d="M15 18l-6-6 6-6" />
-            </svg>
-            Voltar para a Lista
-          </button>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 rounded-lg text-sm font-medium border transition-colors hover:bg-white cursor-pointer"
-              style={{ borderColor: "#E2E8F0", color: "#64748B" }}
-            >
-              Fechar
-            </button>
-            <button
-              onClick={handleSave}
-              className="flex items-center gap-1.5 px-5 py-2 rounded-lg text-sm font-semibold text-white transition-all shadow-sm cursor-pointer"
-              style={{ background: "#0066CC" }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.background = "#0054a8"
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.background = "#0066CC"
-              }}
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2.5"
-              >
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-              Salvar Alterações
-            </button>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
-
-// Modal para Adicionar Novo Cliente
-function NovoClienteModal({ onClose, onAdd, planOptions, allTransportadoras }) {
-  const [form, setForm] = useState({
-    razaoSocial: "",
-    nomeFantasia: "",
-    cnpj: "",
-    dominio: "",
-    adminEmail: "",
-    filiais: "0",
-    contaFrete: "R$ 0,00",
-    transportadoras: [],
-    contrato: new Date().toISOString().slice(0, 10),
-    dataFinalContrato: "",
-    inicioImplantacao: new Date().toISOString().slice(0, 10),
-    dataFinalImplantacao: "",
-    dataGoLive: "",
-    parceiros: [],
-    anexos: [],
-    plano: planOptions[0] || "Profissional",
-    status: "Ativo",
-    contatos: [{ id: 1, nome: "", email: "" }],
-  })
-
-  function update(field, value) {
-    setForm((prev) => ({ ...prev, [field]: value }))
-  }
-
-  function handleAddTransportadora(tName) {
-    if (!tName) return
-    setForm((prev) => {
-      const current = prev.transportadoras || []
-      if (current.includes(tName)) return prev
-      return { ...prev, transportadoras: [...current, tName] }
-    })
-  }
-
-  function handleRemoveTransportadora(tName) {
-    setForm((prev) => ({
-      ...prev,
-      transportadoras: (prev.transportadoras || []).filter((t) => t !== tName),
-    }))
-  }
-
-  function handleSubmit() {
-    if (!form.razaoSocial.trim() && !form.nomeFantasia.trim()) return
-    onAdd({
-      ...form,
-      id: Date.now(),
-      nomeFantasia: form.nomeFantasia.trim() || form.razaoSocial.trim(),
-      razaoSocial: form.razaoSocial.trim() || form.nomeFantasia.trim(),
-      contaFrete: formatMoneyBRL(form.contaFrete),
-    })
-  }
-
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style={{ background: "rgba(11,40,71,0.5)" }}
-      onClick={onClose}
-    >
-      <div
-        className="bg-white rounded-2xl shadow-2xl w-full max-w-3xl overflow-hidden flex flex-col max-h-[85vh]"
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div
-          className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0"
-          style={{ borderColor: "#E2E8F0" }}
-        >
-          <h2 className="text-lg font-bold" style={{ color: "#1E293B" }}>
-            Novo Cliente
-          </h2>
-          <button
-            onClick={onClose}
-            style={{ color: "#64748B" }}
-            className="cursor-pointer"
-          >
-            <svg
-              width="20"
-              height="20"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-            >
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
-          </button>
-        </div>
-
-        <div className="p-6 overflow-y-auto space-y-6 flex-1">
-          <ModalSection title="1. Identificação da Empresa">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <FormField
-                label="Razão Social"
-                value={form.razaoSocial}
-                onChange={(v) => update("razaoSocial", v)}
-                placeholder="Ex: Móveis Florense Ltda"
-                required
-              />
-              <FormField
-                label="Nome Fantasia"
-                value={form.nomeFantasia}
-                onChange={(v) => update("nomeFantasia", v)}
-                placeholder="Ex: Florense"
-              />
-              <FormField
-                label="CNPJ Principal"
-                value={form.cnpj}
-                onChange={(v) => update("cnpj", v)}
-                placeholder="00.000.000/0001-00"
-                required
-              />
-              <FormField
-                label="Domínio"
-                value={form.dominio}
-                onChange={(v) => update("dominio", v)}
-                placeholder="empresa.fretegestao.com.br"
-              />
-              <FormField
-                label="Usuário Administrador (E-mail)"
-                value={form.adminEmail}
-                onChange={(v) => update("adminEmail", v)}
-                placeholder="admin@empresa.com.br"
-                type="email"
-              />
-              <FormField
-                label="Filiais (CNPJs adicionais ou Qtd)"
-                value={form.filiais}
-                onChange={(v) => update("filiais", v)}
-                placeholder="Ex: 2 filiais"
-              />
-            </div>
-          </ModalSection>
-
-          <ModalSection title="2. Operação de Frete & Transportadoras">
-            <div className="space-y-4">
-              <div className="max-w-xs">
-                <MoneyField
-                  label="Conta Frete"
-                  value={form.contaFrete}
-                  onChange={(v) => update("contaFrete", v)}
-                  placeholder="R$ 0,00"
-                />
-              </div>
-
-              <TransportadorasSelector
-                selected={form.transportadoras}
-                onAdd={handleAddTransportadora}
-                onRemove={handleRemoveTransportadora}
-                allOptions={allTransportadoras}
-              />
-            </div>
-          </ModalSection>
-
-          <ModalSection title="3. Contrato, Marcos & Prazos">
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              <FormField
-                label="Data de Assinatura"
-                value={form.contrato}
-                onChange={(v) => update("contrato", v)}
-                type="date"
-              />
-              <FormField
-                label="Data Final de Contrato"
-                value={form.dataFinalContrato}
-                onChange={(v) => update("dataFinalContrato", v)}
-                type="date"
-              />
-              <FormField
-                label="Início da Implantação"
-                value={form.inicioImplantacao}
-                onChange={(v) => update("inicioImplantacao", v)}
-                type="date"
-              />
-              <FormField
-                label="Data Final de Implantação"
-                value={form.dataFinalImplantacao}
-                onChange={(v) => update("dataFinalImplantacao", v)}
-                type="date"
-              />
-              <div className="sm:col-span-2 lg:col-span-1">
-                <FormField
-                  label="Data Go-live (Virada de Chave)"
-                  value={form.dataGoLive}
-                  onChange={(v) => update("dataGoLive", v)}
-                  type="date"
-                />
-              </div>
-              <div>
-                <label
-                  className="text-xs font-medium block mb-1.5"
-                  style={{ color: "#64748B" }}
-                >
-                  Plano
-                </label>
-                <select
-                  className="w-full text-sm border rounded-lg px-3 py-2 outline-none bg-white font-medium cursor-pointer"
-                  style={{ borderColor: "#E2E8F0", color: "#1E293B" }}
-                  value={form.plano}
-                  onChange={(e) => update("plano", e.target.value)}
-                >
-                  {planOptions.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label
-                  className="text-xs font-medium block mb-1.5"
-                  style={{ color: "#64748B" }}
-                >
-                  Status inicial
-                </label>
-                <select
-                  className="w-full text-sm border rounded-lg px-3 py-2 outline-none bg-white font-medium cursor-pointer"
-                  style={{ borderColor: "#E2E8F0", color: "#1E293B" }}
-                  value={form.status}
-                  onChange={(e) => update("status", e.target.value)}
-                >
-                  <option value="Ativo">Ativo</option>
-                  <option value="Inativo">Inativo</option>
-                </select>
-              </div>
-            </div>
-          </ModalSection>
-
-          <ParceirosSection
-            parceiros={form.parceiros}
-            onChange={(newParceiros) => update("parceiros", newParceiros)}
-          />
-
-          <ContatosSection
-            contatos={form.contatos}
-            onChange={(newContatos) => update("contatos", newContatos)}
-          />
-
-          <AnexosSection
-            anexos={form.anexos}
-            onChange={(newAnexos) => update("anexos", newAnexos)}
-          />
-        </div>
-
-        <div
-          className="flex items-center justify-end gap-3 px-6 py-4 border-t flex-shrink-0"
-          style={{ borderColor: "#E2E8F0" }}
-        >
-          <button
-            onClick={onClose}
-            className="px-4 py-2 rounded-lg text-sm font-medium border cursor-pointer"
-            style={{ borderColor: "#E2E8F0", color: "#64748B" }}
           >
             Cancelar
           </button>
           <button
-            onClick={handleSubmit}
-            className="px-4 py-2 rounded-lg text-sm font-semibold text-white cursor-pointer"
+            onClick={handleSalvarGeral}
+            className="px-5 py-2 rounded-lg text-sm font-semibold text-white cursor-pointer shadow-xs"
             style={{ background: "#0066CC" }}
-            disabled={!form.razaoSocial.trim() && !form.nomeFantasia.trim()}
           >
-            Salvar Cliente
+            {isNovo ? "Concluir Cadastro do Cliente" : "Salvar Alterações"}
           </button>
         </div>
       </div>
@@ -1847,448 +974,496 @@ function NovoClienteModal({ onClose, onAdd, planOptions, allTransportadoras }) {
   )
 }
 
+// 🚀 Tela Principal de Clientes
 export default function Clientes() {
+  const [clients, setClients] = useState([])
+  const [planos, setPlanos] = useState([])
+  const [transportadoras, setTransportadoras] = useState([])
+  const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState("")
   const [planFilter, setPlanFilter] = useState("Todos")
   const [statusFilter, setStatusFilter] = useState("Todos")
-  const [showNovoModal, setShowNovoModal] = useState(false)
-  const [selectedClientId, setSelectedClientId] = useState(null)
 
-  // Mutable client list with editable fields
-  const [clients, setClients] = useState(
-    CLIENTES.map((c) => ({
-      ...c,
-      filiais: c.filiais === 0 ? "—" : String(c.filiais),
-      contaFrete: formatMoneyBRL(c.contaFrete),
-      dataFinalContrato: c.dataFinalContrato || "",
-      dataFinalImplantacao: c.dataFinalImplantacao || "",
-      dataGoLive: c.dataGoLive || "",
-      parceiros: Array.isArray(c.parceiros) ? [...c.parceiros] : [],
-      anexos: Array.isArray(c.anexos) ? [...c.anexos] : [],
-      contatos: Array.isArray(c.contatos)
-        ? c.contatos
-        : c.emailsAutorizados
-          ? c.emailsAutorizados.split(",").map((em, idx) => ({
-              id: idx + 1,
-              nome: "",
-              email: em.trim(),
-            }))
-          : [],
-    })),
-  )
+  const [clienteModal, setClienteModal] = useState(null)
+  const [modoModal, setModoModal] = useState("adicionar")
+  const [linhasExpandidas, setLinhasExpandidas] = useState({})
 
-  function updateClient(id, field, value) {
-    setClients((prev) =>
-      prev.map((c) => (c.id === id ? { ...c, [field]: value } : c)),
-    )
+  function toggleExpandir(id) {
+    setLinhasExpandidas((prev) => ({ ...prev, [id]: !prev[id] }))
   }
 
-  function handleSaveFicha(updatedClient) {
-    setClients((prev) =>
-      prev.map((c) => (c.id === updatedClient.id ? updatedClient : c)),
-    )
-    const idx = CLIENTES.findIndex((c) => c.id === updatedClient.id)
-    if (idx !== -1) {
-      CLIENTES[idx] = { ...CLIENTES[idx], ...updatedClient }
+  const carregarDados = async () => {
+    setLoading(true)
+    try {
+      const [resPlanos, resClientes, resTransp] = await Promise.all([
+        fetch(`${BASE_URL}/planos`),
+        fetch(`${BASE_URL}/clientes`),
+        fetch(`${BASE_URL}/transportadoras`),
+      ])
+
+      if (resPlanos.ok) setPlanos(await resPlanos.json())
+      if (resClientes.ok) setClients(await resClientes.json())
+      if (resTransp.ok) setTransportadoras(await resTransp.json())
+    } catch (err) {
+      console.error("Erro ao carregar dados:", err)
+    } finally {
+      setLoading(false)
     }
-    setSelectedClientId(null)
   }
 
-  function handleAddClient(newClient) {
-    setClients((prev) => [newClient, ...prev])
-    CLIENTES.unshift(newClient)
-    setShowNovoModal(false)
+  useEffect(() => {
+    carregarDados()
+  }, [])
+
+  function abrirAdicionar() {
+    setModoModal("adicionar")
+    setClienteModal({
+      nomeFantasia: "",
+      emailAdm: "",
+      dominio: "",
+      integracao: "",
+      valorContaFrete: 0,
+      plano_id: planos[0]?.id || "",
+      status: "A",
+      dataAssContrato: new Date().toISOString().slice(0, 10),
+      dataFimContrato: "",
+      dataIniImpl: new Date().toISOString().slice(0, 10),
+      dataFinImpl: "",
+      empresas: [],
+      transportadoras: [],
+      contatos: [],
+    })
   }
 
-  const filtered = clients.filter((c) => {
+  function abrirEditar(c) {
+    setModoModal("editar")
+    setClienteModal(c)
+  }
+
+  async function handleSalvarModal(formData) {
+    try {
+      if (modoModal === "adicionar") {
+        const matriz = formData.empresas.find((e) => e.is_matriz) || formData.empresas[0]
+
+        const payload = {
+          nomeFantasia: formData.nomeFantasia,
+          emailAdm: formData.emailAdm || null,
+          dominio: formData.dominio || null,
+          integracao: formData.integracao || null,
+          valorContaFrete: formData.valorContaFrete,
+          plano_id: formData.plano_id || null,
+          status: formData.status || "A",
+          dataAssContrato: formData.dataAssContrato || null,
+          dataFimContrato: formData.dataFimContrato || null,
+          dataIniImpl: formData.dataIniImpl || null,
+          dataFinImpl: formData.dataFinImpl || null,
+          matrizCnpj: matriz.cnpj,
+          matrizRazao: matriz.razaoSocial,
+          transportadora_ids: formData.transportadoras.map((t) => t.id),
+          contatos: formData.contatos,
+        }
+
+        const res = await fetch(`${BASE_URL}/clientes`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify(payload),
+        })
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}))
+          const msg = errData.errors ? Object.values(errData.errors)[0][0] : errData.message
+          alert(msg || "Erro ao cadastrar cliente.")
+          return
+        }
+
+        const novoCliente = await res.json()
+
+        const outrasFiliais = formData.empresas.filter((e) => e.cnpj !== matriz.cnpj)
+        for (const f of outrasFiliais) {
+          await fetch(`${BASE_URL}/cliente-empresas`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify({
+              cliente_id: novoCliente.id,
+              cnpj: f.cnpj,
+              razaoSocial: f.razaoSocial,
+              nomeFantasia: f.nomeFantasia,
+              is_matriz: false,
+              status: f.status || "A",
+            }),
+          })
+        }
+      } else {
+        const payload = {
+          nomeFantasia: formData.nomeFantasia,
+          emailAdm: formData.emailAdm,
+          dominio: formData.dominio,
+          integracao: formData.integracao || null,
+          valorContaFrete: formData.valorContaFrete,
+          plano_id: formData.plano_id,
+          status: formData.status,
+          dataAssContrato: formData.dataAssContrato || null,
+          dataFimContrato: formData.dataFimContrato || null,
+          dataIniImpl: formData.dataIniImpl || null,
+          dataFinImpl: formData.dataFinImpl || null,
+          transportadora_ids: formData.transportadoras.map((t) => t.id),
+          contatos: formData.contatos,
+        }
+
+        const res = await fetch(`${BASE_URL}/clientes/${formData.id}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", Accept: "application/json" },
+          body: JSON.stringify(payload),
+        })
+
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}))
+          alert(errData.message || "Erro ao atualizar cliente.")
+          return
+        }
+      }
+
+      setClienteModal(null)
+      carregarDados()
+    } catch (err) {
+      alert("Erro na requisição: " + err.message)
+    }
+  }
+
+  async function handleDeleteCliente(id, nome) {
+    if (!window.confirm(`Deseja realmente excluir o cliente "${nome}"?`)) return
+
+    try {
+      const res = await fetch(`${BASE_URL}/clientes/${id}`, {
+        method: "DELETE",
+        headers: { Accept: "application/json" },
+      })
+
+      const data = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        alert(data.message || "Não foi possível excluir o cliente.")
+        return
+      }
+
+      carregarDados()
+    } catch (err) {
+      alert("Erro ao processar exclusão: " + err.message)
+    }
+  }
+
+  async function handleEmpresaAdded(empresaData) {
+    const res = await fetch(`${BASE_URL}/cliente-empresas`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(empresaData),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.message || "Erro ao adicionar filial")
+    carregarDados()
+  }
+
+  async function handleEmpresaUpdated(empresaId, updateData) {
+    const res = await fetch(`${BASE_URL}/cliente-empresas/${empresaId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify(updateData),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) throw new Error(data.message || "Erro ao salvar alterações da filial")
+    carregarDados()
+  }
+
+  async function handleEmpresaDeleted(empresaId, razaoSocial, isMatriz) {
+    if (isMatriz) {
+      alert("Esta empresa é a Matriz. Defina outra filial como Matriz antes de excluí-la.")
+      return
+    }
+
+    if (!window.confirm(`Deseja remover a filial "${razaoSocial}"?`)) return
+
+    const res = await fetch(`${BASE_URL}/cliente-empresas/${empresaId}`, {
+      method: "DELETE",
+      headers: { Accept: "application/json" },
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      alert(data.message || "Erro ao remover filial.")
+      return
+    }
+    carregarDados()
+  }
+
+  async function handleEmpresaSetMatriz(empresaId) {
+    const res = await fetch(`${BASE_URL}/cliente-empresas/${empresaId}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({ is_matriz: true }),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      alert(data.message || "Erro ao alterar matriz.")
+      return
+    }
+    carregarDados()
+  }
+
+  const filtered = (Array.isArray(clients) ? clients : []).filter((c) => {
+    if (!c) return false
+    const searchLower = (search || "").toLowerCase()
+    const searchNumbers = (search || "").replace(/\D/g, "")
+    const empresas = Array.isArray(c.empresas) ? c.empresas : []
+
+    const matchEmpresa = empresas.some(
+      (e) =>
+        (searchNumbers && e.cnpj?.replace(/\D/g, "").includes(searchNumbers)) ||
+        (e.cnpj && e.cnpj.includes(search)) ||
+        (e.razaoSocial && e.razaoSocial.toLowerCase().includes(searchLower)) ||
+        (e.nomeFantasia && e.nomeFantasia.toLowerCase().includes(searchLower))
+    )
+
+    const nomeFantasia = (c.nomeFantasia || "").toLowerCase()
+    const dominio = (c.dominio || "").toLowerCase()
+
     if (
       search &&
-      !c.razaoSocial.toLowerCase().includes(search.toLowerCase()) &&
-      !c.nomeFantasia.toLowerCase().includes(search.toLowerCase()) &&
-      !c.cnpj.includes(search)
-    )
+      !nomeFantasia.includes(searchLower) &&
+      !dominio.includes(searchLower) &&
+      !matchEmpresa
+    ) {
       return false
-    if (planFilter !== "Todos" && c.plano !== planFilter) return false
-    if (statusFilter !== "Todos" && c.status !== statusFilter) return false
+    }
+
+    if (planFilter !== "Todos" && String(c.plano_id) !== String(planFilter)) return false
+    if (statusFilter !== "Todos" && c.status !== (statusFilter === "Ativo" ? "A" : "I")) return false
     return true
   })
 
-  // Use plan options from configStore
-  const planOptions = configStore.planOptions
-
-  // List of all carrier names for selection
-  const allCarrierNames = [
-    ...new Set([
-      ...TRANSPORTADORAS.map((t) => t.nome),
-      "Sequóia",
-      "TNT",
-      "Jadlog",
-      "Correios",
-      "Total Express",
-      "Azul Cargo",
-      "Braspress",
-    ]),
-  ]
-
-  const selectedClient = clients.find((c) => c.id === selectedClientId) || null
-
   return (
-    <div
-      className="flex-1 flex flex-col overflow-hidden"
-      style={{ background: "#F4F6F9" }}
-    >
-      {/* Header */}
-      <div
-        className="px-6 py-4 border-b bg-white flex-shrink-0"
-        style={{ borderColor: "#E2E8F0" }}
-      >
+    <div className="flex-1 flex flex-col overflow-hidden" style={{ background: "#F4F6F9" }}>
+      <div className="px-6 py-4 border-b bg-white flex-shrink-0" style={{ borderColor: "#E2E8F0" }}>
         <div className="flex items-center justify-between mb-3">
           <div>
             <h1 className="text-lg font-bold" style={{ color: "#1E293B" }}>
-              🏢 Clientes
+              🏢 Cadastro Geral de Clientes & Filiais (Multi-CNPJ)
             </h1>
             <p className="text-xs mt-0.5" style={{ color: "#64748B" }}>
-              Base de empresas cadastradas e parametrização contratual
+              Visão consolidada das contas, contratos e controle individual por CNPJ
             </p>
           </div>
           <button
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white cursor-pointer"
+            onClick={abrirAdicionar}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white cursor-pointer shadow-xs"
             style={{ background: "#0066CC" }}
-            onClick={() => setShowNovoModal(true)}
-            onMouseEnter={(e) => {
-              e.currentTarget.style.background = "#0054a8"
-            }}
-            onMouseLeave={(e) => {
-              e.currentTarget.style.background = "#0066CC"
-            }}
           >
-            <svg
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2.5"
-            >
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            Novo Cliente
+            + Novo Cliente
           </button>
         </div>
+
         <div className="flex items-center gap-3 flex-wrap">
-          <div className="relative flex-1 max-w-xs">
-            <div
-              className="absolute left-3 top-1/2 -translate-y-1/2"
-              style={{ color: "#64748B" }}
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-              >
-                <circle cx="11" cy="11" r="8" />
-                <path d="m21 21-4.35-4.35" />
-              </svg>
-            </div>
-            <input
-              type="text"
-              placeholder="Buscar por CNPJ, Razão Social ou Nome Fantasia..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-4 py-2 text-sm rounded-lg outline-none"
-              style={{
-                border: "1px solid #E2E8F0",
-                color: "#1E293B",
-                background: "#F8FAFC",
-              }}
-            />
-          </div>
+          <input
+            type="text"
+            placeholder="Buscar por Razão, Fantasia, CNPJ..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-80 px-3 py-2 text-sm rounded-lg outline-none border bg-[#F8FAFC]"
+            style={{ borderColor: "#E2E8F0", color: "#1E293B" }}
+          />
+
           <select
-            className="text-sm border rounded-lg px-3 py-2 outline-none cursor-pointer"
+            className="text-sm border rounded-lg px-3 py-2 outline-none bg-white cursor-pointer"
             value={planFilter}
             onChange={(e) => setPlanFilter(e.target.value)}
             style={{ borderColor: "#E2E8F0", color: "#64748B" }}
           >
-            <option>Todos</option>
-            {planOptions.map((p) => (
-              <option key={p}>{p}</option>
+            <option value="Todos">Todos os Planos</option>
+            {planos.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.nome}
+              </option>
             ))}
           </select>
+
           <select
-            className="text-sm border rounded-lg px-3 py-2 outline-none cursor-pointer"
+            className="text-sm border rounded-lg px-3 py-2 outline-none bg-white cursor-pointer"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             style={{ borderColor: "#E2E8F0", color: "#64748B" }}
           >
-            <option>Todos</option>
-            <option>Ativo</option>
-            <option>Inativo</option>
+            <option value="Todos">Todos os Status</option>
+            <option value="Ativo">Ativo</option>
+            <option value="Inativo">Inativo</option>
           </select>
+
           <div className="ml-auto text-xs" style={{ color: "#64748B" }}>
-            Total: <strong>{filtered.length}</strong>{" "}
-            {filtered.length === 1 ? "cliente" : "clientes"}
+            Total: <strong>{filtered.length}</strong> {filtered.length === 1 ? "cliente" : "clientes"}
           </div>
         </div>
       </div>
 
-      {/* Hint */}
-      <div className="px-6 pt-3">
-        <div
-          className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg"
-          style={{ background: "#EBF4FF", color: "#0066CC" }}
-        >
-          <svg
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-          >
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="8" x2="12" y2="12" />
-            <line x1="12" y1="16" x2="12.01" y2="16" />
-          </svg>
-          Clique em <strong>"Ver ficha →"</strong> para visualizar todos os
-          detalhes cadastrados do cliente ou editar informações completas.
-        </div>
-      </div>
-
-      {/* Table */}
       <div className="flex-1 overflow-y-auto p-6 pt-3">
-        <div
-          className="bg-white rounded-xl border overflow-hidden"
-          style={{
-            borderColor: "#E2E8F0",
-            boxShadow: "0 1px 3px rgba(0,0,0,0.06)",
-          }}
-        >
+        <div className="bg-white rounded-xl border overflow-hidden shadow-2xs" style={{ borderColor: "#E2E8F0" }}>
           <table className="w-full text-sm">
             <thead>
-              <tr
-                style={{
-                  background: "#F8FAFC",
-                  borderBottom: "1px solid #E2E8F0",
-                }}
-              >
-                {[
-                  "",
-                  "Empresa",
-                  "CNPJ",
-                  "Plano ✎",
-                  "Filiais ✎",
-                  "Transportadoras",
-                  "Contrato",
-                  "Status ✎",
-                  "Ação",
-                ].map((h, i) => (
+              <tr style={{ background: "#F8FAFC", borderBottom: "1px solid #E2E8F0" }}>
+                <th style={{ width: "40px" }} />
+                {["Cliente / Matriz", "CNPJ Matriz", "Plano", "Estrutura", "Status", "Ações"].map((h, i) => (
                   <th
                     key={i}
                     className="text-left px-4 py-3 text-xs font-semibold uppercase tracking-wide"
-                    style={{ color: h.includes("✎") ? "#0066CC" : "#64748B" }}
+                    style={{ color: "#64748B" }}
                   >
-                    {h.replace(" ✎", "")}
-                    {h.includes("✎") && (
-                      <span
-                        className="ml-1 text-[10px] font-normal normal-case"
-                        style={{ color: "#94A3B8" }}
-                      >
-                        ✎
-                      </span>
-                    )}
+                    {h}
                   </th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {filtered.map((c) => {
+                const matriz = (c.empresas || []).find((e) => e.is_matriz) || (c.empresas || [])[0] || {}
+                const qtdFiliais = Math.max(0, (c.empresas || []).length - 1)
+                const planoObj = c.plano || planos.find((p) => p.id === c.plano_id)
+                const planoNome = planoObj ? planoObj.nome : "—"
+                const isExpanded = Boolean(linhasExpandidas[c.id])
+
                 return (
-                  <tr
-                    key={c.id}
-                    className="border-t hover:bg-[#FAFBFC] transition-colors"
-                    style={{ borderColor: "#E2E8F0" }}
-                  >
-                    <td className="px-4 py-3">
-                      <div
-                        onClick={() => setSelectedClientId(c.id)}
-                        className="w-9 h-9 rounded-lg flex items-center justify-center text-xs font-bold text-white cursor-pointer hover:opacity-90 transition-opacity"
-                        style={{ background: "#0B2847" }}
-                        title="Ver ficha do cliente"
-                      >
-                        {c.nomeFantasia.slice(0, 2).toUpperCase()}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <button
-                        onClick={() => setSelectedClientId(c.id)}
-                        className="font-medium text-left hover:underline cursor-pointer block"
-                        style={{ color: "#1E293B" }}
-                      >
-                        {c.razaoSocial}
-                      </button>
-                      <div className="text-xs" style={{ color: "#64748B" }}>
-                        {c.nomeFantasia} · {c.dominio}
-                      </div>
-                    </td>
-                    <td
-                      className="px-4 py-3 text-xs font-mono"
-                      style={{ color: "#1E293B" }}
-                    >
-                      {c.cnpj}
-                    </td>
-
-                    {/* Plano — editable in place */}
-                    <td className="px-4 py-3">
-                      <InlineSelect
-                        value={c.plano}
-                        options={planOptions}
-                        onChange={(v) => updateClient(c.id, "plano", v)}
-                        renderSelected={(v) => {
-                          const col = PLAN_COLORS[v] || {
-                            bg: "#F1F5F9",
-                            color: "#64748B",
-                          }
-                          return (
-                            <span
-                              className="text-xs font-medium px-2 py-0.5 rounded-full"
-                              style={col}
-                            >
-                              {v}
-                            </span>
-                          )
-                        }}
-                        renderOption={(v) => {
-                          const col = PLAN_COLORS[v] || {
-                            bg: "#F1F5F9",
-                            color: "#64748B",
-                          }
-                          return (
-                            <span
-                              className="text-xs font-medium px-2 py-0.5 rounded-full"
-                              style={col}
-                            >
-                              {v}
-                            </span>
-                          )
-                        }}
-                      />
-                    </td>
-
-                    {/* Filiais — editable text in place */}
-                    <td className="px-4 py-3">
-                      <InlineText
-                        value={c.filiais}
-                        onChange={(v) => updateClient(c.id, "filiais", v)}
-                        placeholder="Ex: 3"
-                      />
-                    </td>
-
-                    <td className="px-4 py-3">
-                      <div className="flex flex-wrap gap-1">
-                        {(c.transportadoras || []).slice(0, 2).map((t) => (
-                          <span
-                            key={t}
-                            className="text-[11px] px-1.5 py-0.5 rounded"
-                            style={{ background: "#F1F5F9", color: "#64748B" }}
-                          >
-                            {t}
-                          </span>
-                        ))}
-                        {(c.transportadoras || []).length > 2 && (
-                          <span
-                            className="text-[11px] px-1.5 py-0.5 rounded"
-                            style={{ background: "#F1F5F9", color: "#64748B" }}
-                          >
-                            +{(c.transportadoras || []).length - 2}
-                          </span>
-                        )}
-                        {(!c.transportadoras ||
-                          c.transportadoras.length === 0) && (
-                          <span className="text-[11px] text-[#94A3B8]">
-                            Nenhuma
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td
-                      className="px-4 py-3 text-xs"
-                      style={{ color: "#64748B" }}
-                    >
-                      <div>{c.contrato}</div>
-                      {c.dataGoLive && (
-                        <div
-                          className="text-[11px] text-[#F26522] font-semibold flex items-center gap-1 mt-0.5"
-                          title="Data Go-live prevista/realizada"
+                  <Fragment key={c.id}>
+                    <tr className="border-t hover:bg-[#FAFBFC] transition-colors" style={{ borderColor: "#E2E8F0" }}>
+                      <td className="pl-4 pr-1 py-3 text-center">
+                        <button
+                          type="button"
+                          onClick={() => toggleExpandir(c.id)}
+                          className="p-1 rounded text-slate-400 hover:text-slate-700 hover:bg-slate-100 cursor-pointer"
+                          title="Ver todas as filiais e CNPJs"
                         >
-                          <span>🚀</span> {c.dataGoLive}
+                          <svg
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2.5"
+                            className={`transform transition-transform ${isExpanded ? "rotate-90" : ""}`}
+                          >
+                            <polyline points="9 18 15 12 9 6" />
+                          </svg>
+                        </button>
+                      </td>
+
+                      <td className="px-4 py-3">
+                        <button
+                          onClick={() => abrirEditar(c)}
+                          className="font-semibold text-left hover:underline cursor-pointer block text-sm"
+                          style={{ color: "#1E293B" }}
+                        >
+                          {c.nomeFantasia}
+                        </button>
+                        <div className="text-xs text-[#64748B] truncate max-w-xs">
+                          {matriz.razaoSocial || "Sem razão social"} {c.dominio ? `· ${c.dominio}` : ""}
                         </div>
-                      )}
-                    </td>
+                      </td>
 
-                    {/* Status — editable in place */}
-                    <td className="px-4 py-3">
-                      <InlineSelect
-                        value={c.status}
-                        options={["Ativo", "Inativo"]}
-                        onChange={(v) => updateClient(c.id, "status", v)}
-                        renderSelected={(v) => (
-                          <span
-                            className="text-xs font-medium px-2 py-0.5 rounded-full"
-                            style={
-                              v === "Ativo"
-                                ? { background: "#ECFDF5", color: "#10B981" }
-                                : { background: "#F1F5F9", color: "#64748B" }
-                            }
-                          >
-                            {v}
-                          </span>
-                        )}
-                        renderOption={(v) => (
-                          <span
-                            className="text-xs font-medium px-2 py-0.5 rounded-full"
-                            style={
-                              v === "Ativo"
-                                ? { background: "#ECFDF5", color: "#10B981" }
-                                : { background: "#F1F5F9", color: "#64748B" }
-                            }
-                          >
-                            {v}
-                          </span>
-                        )}
-                      />
-                    </td>
+                      <td className="px-4 py-3 text-xs font-mono text-[#1E293B]">
+                        {matriz.cnpj ? maskCNPJ(matriz.cnpj) : "—"}
+                      </td>
 
-                    {/* Action: Ver ficha */}
-                    <td className="px-4 py-3">
-                      <button
-                        onClick={() => setSelectedClientId(c.id)}
-                        className="text-xs font-semibold transition-colors flex items-center gap-1 cursor-pointer hover:underline"
-                        style={{ color: "#0066CC" }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.color = "#0054a8"
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.color = "#0066CC"
-                        }}
-                        title={`Ver ficha completa de ${c.nomeFantasia}`}
-                      >
-                        Ver ficha →
-                      </button>
-                    </td>
-                  </tr>
+                      <td className="px-4 py-3">
+                        <span
+                          className="text-xs font-semibold px-2.5 py-0.5 rounded-full"
+                          style={PLAN_COLORS[planoNome] || { background: "#F1F5F9", color: "#64748B" }}
+                        >
+                          {planoNome}
+                        </span>
+                      </td>
+
+                      <td className="px-4 py-3 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => toggleExpandir(c.id)}
+                          className="font-medium text-[#0066CC] hover:underline cursor-pointer"
+                        >
+                          {qtdFiliais === 0 ? "1 Matriz" : `Matriz + ${qtdFiliais} filial(is)`}
+                        </button>
+                      </td>
+
+                      <td className="px-4 py-3">
+                        <span
+                          className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                          style={
+                            c.status === "A"
+                              ? { background: "#ECFDF5", color: "#10B981" }
+                              : { background: "#F1F5F9", color: "#64748B" }
+                          }
+                        >
+                          {c.status === "A" ? "Ativo" : "Inativo"}
+                        </span>
+                      </td>
+
+                      <td className="px-4 py-3 text-xs">
+                        <div className="flex items-center gap-3">
+                          <button
+                            onClick={() => abrirEditar(c)}
+                            className="font-semibold text-[#0066CC] hover:underline cursor-pointer"
+                          >
+                            Ver Ficha →
+                          </button>
+                          <button
+                            onClick={() => handleDeleteCliente(c.id, c.nomeFantasia)}
+                            className="text-slate-400 hover:text-red-600 cursor-pointer"
+                            title="Excluir cliente"
+                          >
+                            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                              <polyline points="3 6 5 6 21 6" />
+                              <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                            </svg>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+
+                    {isExpanded && (
+                      <tr className="bg-[#F8FAFC]">
+                        <td colSpan={7} className="p-4 pl-12 border-t" style={{ borderColor: "#E2E8F0" }}>
+                          <div className="text-xs font-bold text-slate-700 uppercase mb-2">
+                            Empresas e Filiais Vinculadas ({c.empresas?.length || 0}):
+                          </div>
+                          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2">
+                            {(c.empresas || []).map((emp) => (
+                              <div
+                                key={emp.id}
+                                className="bg-white border p-2.5 rounded-lg text-xs space-y-1 shadow-2xs"
+                                style={{ borderColor: emp.is_matriz ? "#93C5FD" : "#E2E8F0" }}
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span
+                                    className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                      emp.is_matriz ? "bg-blue-100 text-blue-700" : "bg-slate-100 text-slate-600"
+                                    }`}
+                                  >
+                                    {emp.is_matriz ? "Matriz" : "Filial"}
+                                  </span>
+                                  <span className="font-mono text-slate-500">{maskCNPJ(emp.cnpj)}</span>
+                                </div>
+                                <div className="font-semibold text-slate-800 truncate" title={emp.razaoSocial}>
+                                  {emp.razaoSocial}
+                                </div>
+                                {emp.nomeFantasia && emp.nomeFantasia !== emp.razaoSocial && (
+                                  <div className="text-slate-500 truncate">Fantasia: {emp.nomeFantasia}</div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 )
               })}
-              {filtered.length === 0 && (
+
+              {!loading && filtered.length === 0 && (
                 <tr>
-                  <td
-                    colSpan={9}
-                    className="px-4 py-10 text-center text-sm text-[#94A3B8]"
-                  >
-                    Nenhum cliente encontrado com os filtros selecionados.
+                  <td colSpan={7} className="px-4 py-10 text-center text-sm text-[#94A3B8]">
+                    Nenhum cliente registrado no banco de dados.
                   </td>
                 </tr>
               )}
@@ -2297,24 +1472,18 @@ export default function Clientes() {
         </div>
       </div>
 
-      {/* Modal Ficha do Cliente */}
-      {selectedClient && (
+      {clienteModal && (
         <FichaClienteModal
-          client={selectedClient}
-          onClose={() => setSelectedClientId(null)}
-          onSave={handleSaveFicha}
-          planOptions={planOptions}
-          allTransportadoras={allCarrierNames}
-        />
-      )}
-
-      {/* Modal Novo Cliente */}
-      {showNovoModal && (
-        <NovoClienteModal
-          onClose={() => setShowNovoModal(false)}
-          onAdd={handleAddClient}
-          planOptions={planOptions}
-          allTransportadoras={allCarrierNames}
+          client={clienteModal}
+          isNovo={modoModal === "adicionar"}
+          onClose={() => setClienteModal(null)}
+          onSave={handleSalvarModal}
+          planosList={planos}
+          transportadorasList={transportadoras}
+          onEmpresaAdded={handleEmpresaAdded}
+          onEmpresaUpdated={handleEmpresaUpdated}
+          onEmpresaDeleted={handleEmpresaDeleted}
+          onEmpresaSetMatriz={handleEmpresaSetMatriz}
         />
       )}
     </div>
