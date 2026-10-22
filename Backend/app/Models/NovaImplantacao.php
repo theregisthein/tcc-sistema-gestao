@@ -2,13 +2,14 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class NovaImplantacao extends Model
 {
     use HasFactory;
 
-    protected $table = 'novaimplantacao';
+    protected $table = 'nova_implantacao';
 
     protected $fillable = [
         'cliente_id',
@@ -23,7 +24,6 @@ class NovaImplantacao extends Model
         return $this->belongsTo(Cliente::class, 'cliente_id');
     }
 
-    // Relacionamento com o usuário responsável
     public function usuarioResponsavel()
     {
         return $this->belongsTo(Usuario::class, 'responsavel');
@@ -34,9 +34,13 @@ class NovaImplantacao extends Model
         return $this->hasMany(Checklist::class, 'implantacao_id');
     }
 
-    // Relacionamento N:N com outros Usuários envolvidos na implantação
     public function usuarios()
     {
-        return $this->belongsToMany(Usuario::class, 'UsuarioImplantacao', 'implantacao_id', 'usuario_id');
+        return $this->belongsToMany(
+            Usuario::class,
+            'usuario_implantacao',
+            'implantacao_id',
+            'usuario_id'
+        );
     }
 }

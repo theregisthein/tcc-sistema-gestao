@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { IMPLANTACOES } from "../data/mock";
+import { useState, useEffect } from "react";
+
+const BASE_URL = "http://localhost:8000/api";
 
 const STATUS_COLORS = {
   "Coleta de Dados": { bg: "#EBF4FF", color: "#0066CC" },
@@ -9,113 +10,128 @@ const STATUS_COLORS = {
   "Finalizada": { bg: "#F1F5F9", color: "#64748B" },
 };
 
-const INTEGRATION_COLORS = {
-  "Protheus": { bg: "#EBF4FF", color: "#0066CC" },
-  "VTEX": { bg: "#F5F3FF", color: "#7C3AED" },
-  "Bling": { bg: "#ECFDF5", color: "#059669" },
-  "Tiny": { bg: "#FFF7ED", color: "#EA580C" },
-  "WooCommerce": { bg: "#F5F3FF", color: "#9333EA" },
-  "SAP": { bg: "#FFF1F2", color: "#E11D48" },
-};
-
 const PHASE_COLORS = ["#0066CC", "#F26522", "#D97706", "#10B981", "#7C3AED", "#E11D48"];
 
-function uid() {
-  return Math.random().toString(36).slice(2);
+// Converte AAAA-MM-DD para DD/MM/AAAA
+function isoParaBr(isoStr) {
+  if (!isoStr) return "";
+  const limpo = isoStr.split("T")[0];
+  const partes = limpo.split("-");
+  if (partes.length !== 3) return isoStr;
+  return `${partes[2]}/${partes[1]}/${partes[0]}`;
 }
 
-// Convert old checklist format to dynamic phases
-function toPhases(checklist) {
-  return Object.entries(checklist).map(([name, tasks]) => ({
-    id: uid(),
-    name,
-    tasks: tasks.map((t) => ({ id: t.id, label: t.label, done: t.done })),
-  }));
+// Converte DD/MM/AAAA para AAAA-MM-DD
+function brParaIso(brStr) {
+  if (!brStr) return "";
+  const partes = brStr.split("/");
+  if (partes.length !== 3) return "";
+  return `${partes[2]}-${partes[1]}-${partes[0]}`;
+}
+
+// Aplica máscara automática DD/MM/AAAA durante a digitação
+function aplicarMascaraData(valor) {
+  const digitos = valor.replace(/\D/g, "").slice(0, 8);
+  if (digitos.length <= 2) return digitos;
+  if (digitos.length <= 4) return `${digitos.slice(0, 2)}/${digitos.slice(2)}`;
+  return `${digitos.slice(0, 2)}/${digitos.slice(2, 4)}/${digitos.slice(4)}`;
+}
+
+function extrairMetadado(observacao, chave, padrao = "") {
+  if (!observacao) return padrao;
+  const match = observacao.match(new RegExp(`${chave}:\\s*([^|\\n]+)`));
+  return match ? match[1].trim() : padrao;
 }
 
 export default function ImplantacaoDetail({ implantacaoId, onBack }) {
-  const imp = IMPLANTACOES.find((i) => i.id === implantacaoId) || IMPLANTACOES[0];
-  const [phases, setPhases] = useState(() =>
-    Object.keys(imp.checklist).length > 0
-      ? toPhases(imp.checklist)
-      : []
-  );
-  const [expandedPhases, setExpandedPhases] = useState(
-    Object.fromEntries((phases).map((p) => [p.id, true]))
-  );
-  const [notes, setNotes] = useState(imp.notes);
-  const [status, setStatus] = useState(imp.status);
+  const [impData, setImpData] = useState(null);
+  const [carregando, setCarregando] = useState(true);
+  const [salvando, setSalvando] = useState(false);
 
-  // Adding phase
+  // Estados editáveis
+  const [notes, setNotes] = useState("");
+  const [status, setStatus] = useState("Coleta de Dados");
+  const [dataAssinatura, setDataAssinatura] = useState("");
+  const [dataInicio, setDataInicio] = useState("");
+  const [dataGoLive, setDataGoLive] = useState("");
+
+  // Checklists Dinâmicos
+  const [phases, setPhases] = useState([]);
+  const [expandedPhases, setExpandedPhases] = useState({});
   const [addingPhase, setAddingPhase] = useState(false);
   const [newPhaseName, setNewPhaseName] = useState("");
+  const [newTaskInput, setNewTaskInput] = useState({});
 
-  // Adding task per phase
-  const [addingTaskIn, setAddingTaskIn] = useState(null);
-  const [newTaskLabel, setNewTaskLabel] = useState("");
+  async function carregarDetalhes() {
+    try {
+      setCarregando(true);
+      const res = await fetch(`${BASE_URL}/novas-implantacoes/${implantacaoId}`);
+      if (!res.ok) throw new Error("Erro ao carregar detalhes da implantação");
+      const dados = await res.json();
+      setImpData(dados);
+      setNotes(dados.observacao || "");
 
-  // Edit phase name
-  const [editingPhaseId, setEditingPhaseId] = useState(null);
-  const [editPhaseName, setEditPhaseName] = useState("");
+      const cliente = dados.cliente || {};
+      setDataAssinatura(isoParaBr(cliente.dataAssContrato || ""));
+      setDataInicio(isoParaBr(cliente.dataIniImpl || ""));
+      setDataGoLive(isoParaBr(cliente.dataFinImpl || extrairMetadado(dados.observacao, "Go-Live", "")));
 
-  const statusStyle = STATUS_COLORS[status] || { bg: "#F1F5F9", color: "#64748B" };
-  const totalTasks = phases.flatMap((p) => p.tasks).length;
-  const totalDone = phases.flatMap((p) => p.tasks).filter((t) => t.done).length;
-  const realProgress = totalTasks > 0 ? Math.round((totalDone / totalTasks) * 100) : 0;
+      const faseAtual = extrairMetadado(dados.observacao, "Fase", dados.status === "F" ? "Finalizada" : "Coleta de Dados");
+      setStatus(faseAtual);
 
-  // ── Phase mutations ──────────────────────────────────────────────────────
-
-  function addPhase() {
-    const name = newPhaseName.trim();
-    if (!name) return;
-    const newPhase = { id: uid(), name, tasks: [] };
-    setPhases((prev) => [...prev, newPhase]);
-    setExpandedPhases((prev) => ({ ...prev, [newPhase.id]: true }));
-    setNewPhaseName("");
-    setAddingPhase(false);
+      if (Array.isArray(dados.checklists)) {
+        const fasesFormatadas = dados.checklists.map((chk) => ({
+          id: chk.id,
+          name: chk.nome,
+          tasks: (chk.itens || []).map((item) => ({
+            id: item.id,
+            label: item.descricao,
+            done: Boolean(item.concluido),
+          })),
+        }));
+        setPhases(fasesFormatadas);
+        setExpandedPhases(Object.fromEntries(fasesFormatadas.map((p) => [p.id, true])));
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setCarregando(false);
+    }
   }
 
-  function removePhase(phaseId) {
-    setPhases((prev) => prev.filter((p) => p.id !== phaseId));
-  }
+  useEffect(() => {
+    if (implantacaoId) carregarDetalhes();
+  }, [implantacaoId]);
 
-  function startEditPhase(phase) {
-    setEditingPhaseId(phase.id);
-    setEditPhaseName(phase.name);
-  }
-
-  function confirmEditPhase(phaseId) {
-    const name = editPhaseName.trim();
-    if (name) setPhases((prev) => prev.map((p) => p.id === phaseId ? { ...p, name } : p));
-    setEditingPhaseId(null);
-  }
-
-  function togglePhaseExpand(phaseId) {
-    setExpandedPhases((prev) => ({ ...prev, [phaseId]: !prev[phaseId] }));
-  }
-
-  // ── Task mutations ───────────────────────────────────────────────────────
-
-  function addTask(phaseId) {
-    const label = newTaskLabel.trim();
-    if (!label) return;
-    const newTask = { id: uid(), label, done: false };
-    setPhases((prev) => prev.map((p) => p.id === phaseId ? { ...p, tasks: [...p.tasks, newTask] } : p));
-    setNewTaskLabel("");
-    setAddingTaskIn(null);
-  }
-
+  // Manipulação de tarefas
   function toggleTask(phaseId, taskId) {
     setPhases((prev) =>
       prev.map((p) =>
         p.id === phaseId
-          ? { ...p, tasks: p.tasks.map((t) => t.id === taskId ? { ...t, done: !t.done } : t) }
+          ? { ...p, tasks: p.tasks.map((t) => (t.id === taskId ? { ...t, done: !t.done } : t)) }
           : p
       )
     );
   }
 
-  function removeTask(phaseId, taskId) {
+  function handleAddTask(phaseId) {
+    const label = (newTaskInput[phaseId] || "").trim();
+    if (!label) return;
+
+    const newTask = {
+      id: `temp_${Date.now()}`,
+      label,
+      done: false,
+    };
+
+    setPhases((prev) =>
+      prev.map((p) => (p.id === phaseId ? { ...p, tasks: [...p.tasks, newTask] } : p))
+    );
+
+    setNewTaskInput((prev) => ({ ...prev, [phaseId]: "" }));
+  }
+
+  function handleRemoveTask(phaseId, taskId) {
     setPhases((prev) =>
       prev.map((p) =>
         p.id === phaseId ? { ...p, tasks: p.tasks.filter((t) => t.id !== taskId) } : p
@@ -123,104 +139,224 @@ export default function ImplantacaoDetail({ implantacaoId, onBack }) {
     );
   }
 
+  function handleAddPhase() {
+    const name = newPhaseName.trim();
+    if (!name) return;
+
+    const newPhase = {
+      id: `phase_${Date.now()}`,
+      name,
+      tasks: [],
+    };
+
+    setPhases((prev) => [...prev, newPhase]);
+    setExpandedPhases((prev) => ({ ...prev, [newPhase.id]: true }));
+    setNewPhaseName("");
+    setAddingPhase(false);
+  }
+
+  function handleRemovePhase(phaseId) {
+    if (!window.confirm("Pretende remover esta fase e todos os seus itens?")) return;
+    setPhases((prev) => prev.filter((p) => p.id !== phaseId));
+  }
+
+  async function salvarTodasAlteracoes() {
+    try {
+      setSalvando(true);
+      const res = await fetch(`${BASE_URL}/novas-implantacoes/${implantacaoId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({
+          observacao: notes,
+          dataAssContrato: brParaIso(dataAssinatura) || null,
+          dataIniImpl: brParaIso(dataInicio) || null,
+          dataFinImpl: brParaIso(dataGoLive) || null,
+          phases: phases,
+        }),
+      });
+
+      if (!res.ok) throw new Error("Erro ao guardar alterações");
+      alert("Implantação, datas e checklists atualizados com sucesso!");
+      await carregarDetalhes();
+    } catch (err) {
+      alert("Erro ao guardar alterações.");
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  if (carregando) {
+    return (
+      <div className="flex-1 flex items-center justify-center p-12 text-sm text-[#64748B]">
+        A carregar detalhes da implantação...
+      </div>
+    );
+  }
+
+  if (!impData) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center p-12 text-sm text-[#64748B]">
+        Implantação não encontrada.
+        <button onClick={onBack} className="mt-4 text-[#0066CC] font-semibold hover:underline">
+          Voltar para a listagem
+        </button>
+      </div>
+    );
+  }
+
+  const cliente = impData.cliente || {};
+  const nomeCliente = cliente.nomeFantasia || `Cliente #${impData.cliente_id}`;
+  const totalTasks = phases.flatMap((p) => p.tasks).length;
+  const totalDone = phases.flatMap((p) => p.tasks).filter((t) => t.done).length;
+  const realProgress = totalTasks > 0 ? Math.round((totalDone / totalTasks) * 100) : 0;
+  const statusStyle = STATUS_COLORS[status] || { bg: "#F1F5F9", color: "#64748B" };
+
   return (
     <div className="flex-1 overflow-y-auto" style={{ background: "#F4F6F9" }}>
-      {/* Header */}
+      {/* Topo com Ações */}
       <div className="bg-white border-b px-6 py-4 sticky top-0 z-10" style={{ borderColor: "#E2E8F0" }}>
-        <div className="flex items-center gap-2 mb-1">
+        <div className="flex items-center justify-between mb-2">
           <button
             onClick={onBack}
-            className="flex items-center gap-1.5 text-sm transition-colors"
-            style={{ color: "#64748B" }}
-            onMouseEnter={(e) => { e.currentTarget.style.color = "#0066CC"; }}
-            onMouseLeave={(e) => { e.currentTarget.style.color = "#64748B"; }}
+            className="text-xs font-semibold text-slate-500 hover:text-[#0066CC] cursor-pointer"
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M15 18l-6-6 6-6" /></svg>
-            Implantações
+            ← Voltar para Implantações
           </button>
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#CBD5E1" strokeWidth="2"><path d="M9 18l6-6-6-6" /></svg>
-          <span className="text-sm font-medium" style={{ color: "#1E293B" }}>{imp.client} — {imp.id}</span>
+
+          <button
+            onClick={salvarTodasAlteracoes}
+            disabled={salvando}
+            className="px-4 py-2 rounded-lg text-xs font-bold text-white shadow-xs cursor-pointer disabled:opacity-50"
+            style={{ background: "#0066CC" }}
+          >
+            {salvando ? "A guardar..." : "Salvar Alterações"}
+          </button>
         </div>
-        <div className="flex items-start justify-between mt-3">
+
+        <div className="flex items-start justify-between flex-wrap gap-4">
           <div>
-            <h1 className="text-xl font-bold" style={{ color: "#1E293B" }}>{imp.client}</h1>
-            <div className="flex items-center gap-3 mt-1 flex-wrap">
-              <span className="text-sm font-medium px-2.5 py-0.5 rounded-full" style={statusStyle}>{status}</span>
-              <span className="text-sm" style={{ color: "#64748B" }}>🌐 {imp.domain}</span>
-              <span className="text-sm font-medium" style={{ color: imp.overdue ? "#E11D48" : imp.daysRemaining <= 5 ? "#D97706" : "#10B981" }}>
-                {imp.overdue ? `⚠️ Atrasado há ${Math.abs(imp.daysRemaining)} dias` : `⏳ ${imp.daysRemaining} dias para Go-Live (${imp.goLiveDate})`}
+            <h1 className="text-xl font-bold text-[#1E293B]">{nomeCliente}</h1>
+            <div className="flex items-center gap-3 mt-1 text-xs">
+              <span className="font-semibold px-2.5 py-0.5 rounded-full" style={statusStyle}>
+                {status}
               </span>
+              <span className="text-[#64748B]">🌐 {cliente.dominio || "Sem domínio"}</span>
             </div>
           </div>
+
           <div className="flex items-center gap-2">
-            <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white" style={{ background: "#0066CC" }}>RR</div>
-            <div className="text-sm" style={{ color: "#64748B" }}>{imp.assignee}</div>
-            <select
-              className="text-xs border rounded-lg px-2 py-1 ml-2 outline-none"
-              value={status}
-              onChange={(e) => setStatus(e.target.value)}
-              style={{ borderColor: "#E2E8F0", color: "#64748B" }}
-            >
-              {Object.keys(STATUS_COLORS).map((s) => <option key={s}>{s}</option>)}
-            </select>
+            <span className="text-xs font-semibold text-slate-500">Responsável Principal:</span>
+            <span className="text-xs font-bold text-slate-800">
+              {impData.usuario_responsavel?.nome || impData.usuarioResponsavel?.nome || "Não atribuído"}
+            </span>
           </div>
         </div>
       </div>
 
       <div className="max-w-5xl mx-auto px-6 py-6 space-y-6">
-        {/* Block 1: Technical params */}
-        <div className="bg-white rounded-xl border p-6" style={{ borderColor: "#E2E8F0", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
-          <h2 className="text-base font-semibold mb-4" style={{ color: "#1E293B" }}>📋 Parâmetros Técnicos & Contratuais</h2>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-            <Param label="Plano" value={imp.plan} highlight />
-            <Param label="Tabelas de Frete" value={`${imp.tablesCount} tabelas`} />
-            <Param label="Data de Assinatura" value={imp.signatureDate} />
-            <Param label="Início da Implantação" value={imp.startDate} />
-          </div>
-          <div>
-            <div className="text-xs font-semibold uppercase tracking-wider mb-2" style={{ color: "#64748B" }}>Integrações Sistêmicas</div>
-            <div className="flex flex-wrap gap-2">
-              {imp.integrations.map((int) => {
-                const ic = INTEGRATION_COLORS[int] || { bg: "#F1F5F9", color: "#64748B" };
-                return (
-                  <span key={int} className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium border" style={{ borderColor: ic.color + "40", ...ic }}>
-                    🔗 {int}
-                  </span>
-                );
-              })}
+        {/* Parâmetros e Datas no Formato Brasileiro DD/MM/AAAA */}
+        <div className="bg-white rounded-xl border p-6 shadow-2xs" style={{ borderColor: "#E2E8F0" }}>
+          <h2 className="text-sm font-bold text-[#1E293B] mb-4">📋 Datas e Cronograma Editáveis</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div>
+              <label className="text-xs font-medium block mb-1 text-slate-600">Assinatura do Contrato</label>
+              <input
+                type="text"
+                placeholder="DD/MM/AAAA"
+                maxLength={10}
+                value={dataAssinatura}
+                onChange={(e) => setDataAssinatura(aplicarMascaraData(e.target.value))}
+                className="w-full text-xs border rounded-lg px-3 py-2 bg-white outline-none focus:border-blue-500 font-mono"
+                style={{ borderColor: "#E2E8F0" }}
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium block mb-1 text-slate-600">Início da Implantação</label>
+              <input
+                type="text"
+                placeholder="DD/MM/AAAA"
+                maxLength={10}
+                value={dataInicio}
+                onChange={(e) => setDataInicio(aplicarMascaraData(e.target.value))}
+                className="w-full text-xs border rounded-lg px-3 py-2 bg-white outline-none focus:border-blue-500 font-mono"
+                style={{ borderColor: "#E2E8F0" }}
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium block mb-1 text-slate-600">Previsão de Go-Live</label>
+              <input
+                type="text"
+                placeholder="DD/MM/AAAA"
+                maxLength={10}
+                value={dataGoLive}
+                onChange={(e) => setDataGoLive(aplicarMascaraData(e.target.value))}
+                className="w-full text-xs border rounded-lg px-3 py-2 bg-white outline-none focus:border-blue-500 font-semibold font-mono"
+                style={{ borderColor: "#E2E8F0" }}
+              />
             </div>
           </div>
         </div>
 
-        {/* Block 2: Dynamic Checklist */}
-        <div className="bg-white rounded-xl border overflow-hidden" style={{ borderColor: "#E2E8F0", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
+        {/* Checklist Operacional Editável */}
+        <div className="bg-white rounded-xl border overflow-hidden shadow-2xs" style={{ borderColor: "#E2E8F0" }}>
           <div className="px-6 py-4 border-b flex items-center justify-between" style={{ borderColor: "#E2E8F0" }}>
             <div>
-              <h2 className="text-base font-semibold" style={{ color: "#1E293B" }}>✅ Checklist Operacional</h2>
-              <p className="text-sm mt-0.5" style={{ color: "#64748B" }}>
+              <h2 className="text-sm font-bold text-[#1E293B]">✅ Checklist Operacional</h2>
+              <p className="text-xs text-[#64748B] mt-0.5">
                 {phases.length} fase{phases.length !== 1 ? "s" : ""} · {totalDone} de {totalTasks} tarefas concluídas
               </p>
             </div>
-            <div className="flex items-center gap-3">
-              <div className="w-32 h-2 rounded-full overflow-hidden" style={{ background: "#E2E8F0" }}>
+            <div className="flex items-center gap-4">
+              <div className="w-32 h-2 rounded-full overflow-hidden bg-slate-100">
                 <div
                   className="h-full rounded-full transition-all"
-                  style={{ width: `${realProgress}%`, background: realProgress === 100 ? "#10B981" : "#0066CC" }}
+                  style={{
+                    width: `${realProgress}%`,
+                    background: realProgress === 100 ? "#10B981" : "#0066CC",
+                  }}
                 />
               </div>
-              <span className="text-sm font-bold" style={{ color: realProgress === 100 ? "#10B981" : "#0066CC" }}>{realProgress}%</span>
+              <span className="text-xs font-bold text-[#1E293B]">{realProgress}%</span>
+              <button
+                type="button"
+                onClick={() => setAddingPhase(true)}
+                className="px-2.5 py-1 text-xs font-semibold rounded-lg border border-blue-300 text-[#0066CC] hover:bg-blue-50 cursor-pointer"
+              >
+                + Nova Fase
+              </button>
             </div>
           </div>
 
-          <div>
-            {phases.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-10 text-center" style={{ color: "#94A3B8" }}>
-                <div className="text-4xl mb-2">📋</div>
-                <p className="text-sm">Nenhuma fase cadastrada ainda.</p>
-                <p className="text-xs mt-1">Clique em "Adicionar Fase" para começar.</p>
-              </div>
-            )}
+          {/* Bloco de Adicionar Nova Fase */}
+          {addingPhase && (
+            <div className="p-4 border-b bg-slate-50 flex items-center gap-2" style={{ borderColor: "#E2E8F0" }}>
+              <input
+                type="text"
+                placeholder="Nome da nova fase..."
+                value={newPhaseName}
+                onChange={(e) => setNewPhaseName(e.target.value)}
+                className="flex-1 text-xs border rounded-lg px-3 py-1.5 outline-none bg-white"
+                style={{ borderColor: "#CBD5E1" }}
+              />
+              <button
+                type="button"
+                onClick={handleAddPhase}
+                className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white cursor-pointer"
+                style={{ background: "#0066CC" }}
+              >
+                Adicionar
+              </button>
+              <button
+                type="button"
+                onClick={() => { setAddingPhase(false); setNewPhaseName(""); }}
+                className="text-xs text-slate-500 hover:underline cursor-pointer px-2"
+              >
+                Cancelar
+              </button>
+            </div>
+          )}
 
+          <div>
             {phases.map((phase, phaseIdx) => {
               const phaseDone = phase.tasks.filter((t) => t.done).length;
               const isExpanded = expandedPhases[phase.id] !== false;
@@ -228,276 +364,115 @@ export default function ImplantacaoDetail({ implantacaoId, onBack }) {
 
               return (
                 <div key={phase.id} className="border-b last:border-b-0" style={{ borderColor: "#E2E8F0" }}>
-                  {/* Phase header */}
-                  <div className="flex items-center gap-2 px-6 py-3 hover:bg-[#F8FAFC] transition-colors">
-                    <button onClick={() => togglePhaseExpand(phase.id)} className="flex items-center gap-3 flex-1 text-left">
-                      <div className="w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold text-white flex-shrink-0" style={{ background: phaseColor }}>
+                  <div className="flex items-center justify-between px-6 py-3 hover:bg-[#F8FAFC] transition-colors">
+                    <div
+                      onClick={() =>
+                        setExpandedPhases((prev) => ({ ...prev, [phase.id]: !prev[phase.id] }))
+                      }
+                      className="flex items-center gap-3 cursor-pointer flex-1"
+                    >
+                      <div
+                        className="w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold text-white flex-shrink-0"
+                        style={{ background: phaseColor }}
+                      >
                         {phaseIdx + 1}
                       </div>
-
-                      {editingPhaseId === phase.id ? (
-                        <input
-                          className="flex-1 text-sm font-medium outline-none border-b"
-                          value={editPhaseName}
-                          onChange={(e) => setEditPhaseName(e.target.value)}
-                          onKeyDown={(e) => { if (e.key === "Enter") confirmEditPhase(phase.id); if (e.key === "Escape") setEditingPhaseId(null); }}
-                          onClick={(e) => e.stopPropagation()}
-                          autoFocus
-                          style={{ color: "#1E293B", borderColor: phaseColor }}
-                        />
-                      ) : (
-                        <span className="font-medium text-sm flex-1" style={{ color: "#1E293B" }}>{phase.name}</span>
-                      )}
-
-                      <span className="text-xs font-medium" style={{ color: phaseDone === phase.tasks.length && phase.tasks.length > 0 ? "#10B981" : "#64748B" }}>
-                        {phaseDone}/{phase.tasks.length}
+                      <span className="font-semibold text-sm text-[#1E293B]">{phase.name}</span>
+                      <span className="text-xs text-[#64748B]">
+                        ({phaseDone}/{phase.tasks.length})
                       </span>
-                      {phaseDone === phase.tasks.length && phase.tasks.length > 0 && (
-                        <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: "#ECFDF5", color: "#10B981" }}>✓ Concluída</span>
-                      )}
-                      <svg
-                        width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth="2"
-                        className="transition-transform flex-shrink-0"
-                        style={{ transform: isExpanded ? "rotate(180deg)" : "rotate(0deg)" }}
-                      >
-                        <path d="M6 9l6 6 6-6" />
-                      </svg>
-                    </button>
+                    </div>
 
-                    {/* Phase actions */}
-                    <div className="flex items-center gap-1 flex-shrink-0 ml-1">
-                      {editingPhaseId === phase.id ? (
-                        <button
-                          onClick={() => confirmEditPhase(phase.id)}
-                          className="text-[11px] font-semibold px-2 py-0.5 rounded"
-                          style={{ background: "#ECFDF5", color: "#10B981" }}
-                        >
-                          ✓ OK
-                        </button>
-                      ) : (
-                        <button
-                          onClick={(e) => { e.stopPropagation(); startEditPhase(phase); }}
-                          className="p-1 rounded hover:bg-[#F1F5F9] transition-colors"
-                          title="Renomear fase"
-                        >
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="2">
-                            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-                            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-                          </svg>
-                        </button>
-                      )}
+                    <div className="flex items-center gap-3">
                       <button
-                        onClick={(e) => { e.stopPropagation(); if (window.confirm(`Remover a fase "${phase.name}"?`)) removePhase(phase.id); }}
-                        className="p-1 rounded hover:bg-[#FFF1F2] transition-colors"
-                        title="Remover fase"
+                        type="button"
+                        onClick={() => handleRemovePhase(phase.id)}
+                        className="text-xs text-red-500 hover:underline cursor-pointer"
                       >
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#E11D48" strokeWidth="2">
-                          <polyline points="3 6 5 6 21 6" />
-                          <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-                          <path d="M10 11v6M14 11v6" />
-                          <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
-                        </svg>
+                        Excluir Fase
                       </button>
+                      <span className="text-xs text-slate-400">{isExpanded ? "▲" : "▼"}</span>
                     </div>
                   </div>
 
-                  {/* Tasks */}
                   {isExpanded && (
-                    <div className="pb-2" style={{ background: "#F8FAFC" }}>
+                    <div className="bg-[#F8FAFC] px-6 py-3 space-y-2">
                       {phase.tasks.map((task) => (
-                        <div
-                          key={task.id}
-                          className="flex items-center gap-2 py-2 px-6 hover:bg-white transition-colors group/task"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={task.done}
-                            onChange={() => toggleTask(phase.id, task.id)}
-                            className="rounded w-4 h-4 flex-shrink-0"
-                            style={{ accentColor: phaseColor }}
-                          />
-                          <span
-                            className="text-sm flex-1"
-                            style={{
-                              color: task.done ? "#94A3B8" : "#1E293B",
-                              textDecoration: task.done ? "line-through" : "none",
-                            }}
-                          >
-                            {task.label}
-                          </span>
-                          {task.done && <span className="text-xs" style={{ color: "#10B981" }}>✓</span>}
+                        <div key={task.id} className="flex items-center justify-between py-1 px-2 rounded hover:bg-white">
+                          <label className="flex items-center gap-3 cursor-pointer flex-1">
+                            <input
+                              type="checkbox"
+                              checked={task.done}
+                              onChange={() => toggleTask(phase.id, task.id)}
+                              className="rounded w-4 h-4 accent-[#0066CC]"
+                            />
+                            <span
+                              className={`text-xs ${
+                                task.done ? "line-through text-slate-400" : "text-slate-700"
+                              }`}
+                            >
+                              {task.label}
+                            </span>
+                          </label>
+
                           <button
-                            onClick={() => removeTask(phase.id, task.id)}
-                            className="opacity-0 group-hover/task:opacity-100 transition-opacity p-0.5 rounded hover:bg-[#FFF1F2]"
-                            title="Remover tarefa"
+                            type="button"
+                            onClick={() => handleRemoveTask(phase.id, task.id)}
+                            className="text-xs text-red-500 hover:underline cursor-pointer px-1"
                           >
-                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#E11D48" strokeWidth="2">
-                              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                            </svg>
+                            ✕
                           </button>
                         </div>
                       ))}
 
-                      {/* Add task */}
-                      {addingTaskIn === phase.id ? (
-                        <div className="flex items-center gap-2 px-6 py-2">
-                          <div className="w-4 h-4 flex-shrink-0" />
-                          <input
-                            type="text"
-                            value={newTaskLabel}
-                            onChange={(e) => setNewTaskLabel(e.target.value)}
-                            placeholder="Descrição da tarefa..."
-                            autoFocus
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") addTask(phase.id);
-                              if (e.key === "Escape") { setAddingTaskIn(null); setNewTaskLabel(""); }
-                            }}
-                            className="flex-1 text-sm border-b outline-none bg-transparent"
-                            style={{ borderColor: phaseColor, color: "#1E293B" }}
-                          />
-                          <button
-                            onClick={() => addTask(phase.id)}
-                            className="text-xs font-semibold px-2 py-0.5 rounded"
-                            style={{ background: phaseColor + "20", color: phaseColor }}
-                          >
-                            Adicionar
-                          </button>
-                          <button
-                            onClick={() => { setAddingTaskIn(null); setNewTaskLabel(""); }}
-                            className="text-xs"
-                            style={{ color: "#94A3B8" }}
-                          >
-                            Cancelar
-                          </button>
-                        </div>
-                      ) : (
+                      {/* Inserção de tarefa na fase */}
+                      <div className="flex gap-2 pt-2 border-t mt-2" style={{ borderColor: "#E2E8F0" }}>
+                        <input
+                          type="text"
+                          placeholder="Adicionar nova tarefa nesta fase..."
+                          value={newTaskInput[phase.id] || ""}
+                          onChange={(e) =>
+                            setNewTaskInput((prev) => ({ ...prev, [phase.id]: e.target.value }))
+                          }
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              handleAddTask(phase.id);
+                            }
+                          }}
+                          className="flex-1 text-xs border rounded-lg px-3 py-1.5 outline-none bg-white"
+                          style={{ borderColor: "#CBD5E1" }}
+                        />
                         <button
-                          onClick={() => { setAddingTaskIn(phase.id); setNewTaskLabel(""); }}
-                          className="flex items-center gap-2 text-xs font-medium px-6 py-2 w-full text-left hover:bg-white transition-colors"
-                          style={{ color: "#64748B" }}
+                          type="button"
+                          onClick={() => handleAddTask(phase.id)}
+                          className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white cursor-pointer"
+                          style={{ background: "#0066CC" }}
                         >
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                            <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-                          </svg>
-                          Adicionar tarefa
+                          + Item
                         </button>
-                      )}
+                      </div>
                     </div>
                   )}
                 </div>
               );
             })}
-
-            {/* Add phase */}
-            <div className="px-6 py-3 border-t" style={{ borderColor: "#E2E8F0" }}>
-              {addingPhase ? (
-                <div className="flex items-center gap-2">
-                  <div
-                    className="w-6 h-6 rounded-full flex items-center justify-center text-[11px] font-bold text-white flex-shrink-0"
-                    style={{ background: PHASE_COLORS[phases.length % PHASE_COLORS.length] }}
-                  >
-                    {phases.length + 1}
-                  </div>
-                  <input
-                    type="text"
-                    value={newPhaseName}
-                    onChange={(e) => setNewPhaseName(e.target.value)}
-                    placeholder="Nome da nova fase..."
-                    autoFocus
-                    onKeyDown={(e) => { if (e.key === "Enter") addPhase(); if (e.key === "Escape") { setAddingPhase(false); setNewPhaseName(""); } }}
-                    className="flex-1 text-sm border-b outline-none bg-transparent"
-                    style={{ borderColor: "#0066CC", color: "#1E293B" }}
-                  />
-                  <button
-                    onClick={addPhase}
-                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white"
-                    style={{ background: "#0066CC" }}
-                  >
-                    Criar Fase
-                  </button>
-                  <button
-                    onClick={() => { setAddingPhase(false); setNewPhaseName(""); }}
-                    className="text-xs"
-                    style={{ color: "#94A3B8" }}
-                  >
-                    Cancelar
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setAddingPhase(true)}
-                  className="flex items-center gap-2 text-sm font-medium transition-colors hover:opacity-80"
-                  style={{ color: "#0066CC" }}
-                >
-                  <div className="w-6 h-6 rounded-full border-2 border-dashed flex items-center justify-center" style={{ borderColor: "#0066CC" }}>
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#0066CC" strokeWidth="2.5">
-                      <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-                    </svg>
-                  </div>
-                  Adicionar nova fase
-                </button>
-              )}
-            </div>
           </div>
         </div>
 
-        {/* Block 3: Documents */}
-        <div className="bg-white rounded-xl border p-6" style={{ borderColor: "#E2E8F0", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
-          <h2 className="text-base font-semibold mb-4" style={{ color: "#1E293B" }}>📎 Documentação e Anexos</h2>
-          <div className="flex flex-wrap gap-2 mb-4">
-            {imp.attachments.map((att) => (
-              <div key={att} className="flex items-center gap-2 px-3 py-2 rounded-lg border cursor-pointer hover:bg-[#F8FAFC] transition-colors" style={{ borderColor: "#E2E8F0" }}>
-                <span className="text-lg">{att.endsWith(".pdf") ? "📄" : "📊"}</span>
-                <div>
-                  <div className="text-xs font-medium" style={{ color: "#1E293B" }}>{att}</div>
-                  <div className="text-[10px]" style={{ color: "#64748B" }}>{att.endsWith(".pdf") ? "PDF" : "Planilha"}</div>
-                </div>
-              </div>
-            ))}
-            <button
-              className="flex items-center gap-2 px-4 py-2 rounded-lg border border-dashed text-xs font-medium transition-colors hover:bg-[#F8FAFC]"
-              style={{ borderColor: "#CBD5E1", color: "#64748B" }}
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-              </svg>
-              Upload (JPG, JPEG, PDF)
-            </button>
-          </div>
-        </div>
-
-        {/* Block 4: Notes */}
-        <div className="bg-white rounded-xl border p-6" style={{ borderColor: "#E2E8F0", boxShadow: "0 1px 3px rgba(0,0,0,0.06)" }}>
-          <h2 className="text-base font-semibold mb-3" style={{ color: "#1E293B" }}>📝 Observações Gerais da Equipe</h2>
+        {/* Observações */}
+        <div className="bg-white rounded-xl border p-6 shadow-2xs" style={{ borderColor: "#E2E8F0" }}>
+          <h2 className="text-sm font-bold text-[#1E293B] mb-3">📝 Observações Gerais da Equipe</h2>
           <textarea
-            rows={5} value={notes} onChange={(e) => setNotes(e.target.value)}
-            placeholder="Registre observações da equipe de implantação..."
-            className="w-full text-sm resize-none outline-none rounded-lg p-4 transition-all"
-            style={{ border: "1.5px solid #E2E8F0", color: "#1E293B", background: "#F8FAFC" }}
-            onFocus={(e) => { e.target.style.borderColor = "#0066CC"; e.target.style.background = "#fff"; }}
-            onBlur={(e) => { e.target.style.borderColor = "#E2E8F0"; e.target.style.background = "#F8FAFC"; }}
+            rows={5}
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
+            placeholder="Registe notas e acordos operacionais..."
+            className="w-full text-xs border rounded-lg p-3 outline-none transition-all leading-relaxed bg-[#F8FAFC]"
+            style={{ borderColor: "#E2E8F0", color: "#1E293B" }}
           />
-          <div className="flex justify-end mt-2">
-            <button
-              className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all"
-              style={{ background: "#0066CC" }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "#0054a8"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "#0066CC"; }}
-            >
-              Salvar Observações
-            </button>
-          </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-function Param({ label, value, highlight }) {
-  return (
-    <div className="p-3 rounded-lg" style={{ background: "#F8FAFC" }}>
-      <div className="text-[11px] font-semibold uppercase tracking-wider mb-1" style={{ color: "#64748B" }}>{label}</div>
-      <div className="text-sm font-semibold" style={{ color: highlight ? "#0066CC" : "#1E293B" }}>{value}</div>
     </div>
   );
 }

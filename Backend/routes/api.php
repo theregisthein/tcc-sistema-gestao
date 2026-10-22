@@ -13,6 +13,8 @@ use App\Http\Controllers\ClienteEmpresaController;
 use App\Http\Controllers\ClienteController;
 use App\Http\Controllers\UsuarioController;
 use App\Http\Controllers\ModuloController;
+use App\Http\Controllers\NovaImplantacaoController;
+use App\Http\Controllers\ChecklistController;
 
 use Illuminate\Support\Facades\Route;
 
@@ -39,3 +41,9 @@ Route::apiResource('clientes', ClienteController::class);
 Route::apiResource('usuarios', UsuarioController::class);
 
 Route::apiResource('modulos', ModuloController::class);
+
+Route::apiResource('novas-implantacoes', NovaImplantacaoController::class);
+
+Route::patch('checklist-itens/{id}/toggle', [ChecklistController::class, 'toggleItem']);
+Route::post('checklists/{checklistId}/itens', [ChecklistController::class, 'addItem']);
+Route::delete('checklist-itens/{id}', [ChecklistController::class, 'destroyItem']);

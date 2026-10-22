@@ -1,7 +1,14 @@
-import { useState } from "react";
-import { IMPLANTACOES, CURRENT_USER } from "../data/mock";
+import { useState, useEffect, useMemo } from "react";
 
-const STATUS_STAGES = ["Coleta de Dados", "Parametrização de Tabelas", "Em Homologação", "Go-Live Agendado", "Finalizada"];
+const BASE_URL = "http://localhost:8000/api";
+
+const STATUS_STAGES = [
+  "Coleta de Dados",
+  "Parametrização de Tabelas",
+  "Em Homologação",
+  "Go-Live Agendado",
+  "Finalizada",
+];
 
 const STATUS_COLORS = {
   "Coleta de Dados": { bg: "#EBF4FF", color: "#0066CC" },
@@ -12,44 +19,186 @@ const STATUS_COLORS = {
 };
 
 const PRIORITY_COLORS = {
-  "Alta": "#F26522",
-  "Média": "#F59E0B",
-  "Baixa": "#10B981",
+  Alta: "#F26522",
+  Média: "#F59E0B",
+  Baixa: "#10B981",
 };
 
-const INTEGRATION_COLORS = {
-  "Protheus": { bg: "#EBF4FF", color: "#0066CC" },
-  "VTEX": { bg: "#F5F3FF", color: "#7C3AED" },
-  "Bling": { bg: "#ECFDF5", color: "#059669" },
-  "Tiny": { bg: "#FFF7ED", color: "#EA580C" },
-  "WooCommerce": { bg: "#F5F3FF", color: "#9333EA" },
-  "SAP": { bg: "#FFF1F2", color: "#E11D48" },
-};
+function extrairMetadado(observacao, chave, padrao = "") {
+  if (!observacao) return padrao;
+  const match = observacao.match(new RegExp(`${chave}:\\s*([^|\\n]+)`));
+  return match ? match[1].trim() : padrao;
+}
+
+function calcularDiasRestantes(dataAlvo) {
+  if (!dataAlvo) return null;
+  const target = new Date(dataAlvo);
+  if (isNaN(target.getTime())) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  target.setHours(0, 0, 0, 0);
+  const diffTime = target.getTime() - today.getTime();
+  return Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+}
+
+function formatarDataBR(dataStr) {
+  if (!dataStr) return "—";
+  const d = new Date(dataStr + (dataStr.includes("T") ? "" : "T00:00:00"));
+  if (isNaN(d.getTime())) return "—";
+  return d.toLocaleDateString("pt-BR");
+}
 
 export default function Implantacoes({ initialStatus, onViewImplantacao, onNovaImplantacao }) {
+  const [implantacoes, setImplantacoes] = useState([]);
+  const [usuarios, setUsuarios] = useState([]);
+  const [carregando, setCarregando] = useState(true);
+
   const [statusFilter, setStatusFilter] = useState(
     initialStatus === "Finalizada" ? "Finalizada" : "Todos"
   );
   const [priorityFilter, setPriorityFilter] = useState("Todas");
+  const [assigneeFilter, setAssigneeFilter] = useState("Todos");
   const [clientSearch, setClientSearch] = useState("");
+  const [ordenacao, setOrdenacao] = useState("prazo");
   const [showFilters, setShowFilters] = useState(true);
 
-  const filtered = IMPLANTACOES.filter((i) => {
-    if (statusFilter !== "Todos" && statusFilter !== "Em Andamento") {
-      if (i.status !== statusFilter) return false;
-    }
-    if (statusFilter === "Em Andamento" && i.status === "Finalizada") return false;
-    if (priorityFilter !== "Todas" && i.priority !== priorityFilter) return false;
-    if (clientSearch && !i.client.toLowerCase().includes(clientSearch.toLowerCase())) return false;
-    return true;
-  });
+  async function carregarDados() {
+    try {
+      setCarregando(true);
+      const [resImp, resUsers] = await Promise.all([
+        fetch(`${BASE_URL}/novas-implantacoes`),
+        fetch(`${BASE_URL}/usuarios`),
+      ]);
 
-  const emAndamento = IMPLANTACOES.filter((i) => i.status !== "Finalizada").length;
-  const finalizadasMes = IMPLANTACOES.filter((i) => i.status === "Finalizada").length;
+      if (resImp.ok) {
+        const dadosImp = await resImp.json();
+        setImplantacoes(Array.isArray(dadosImp) ? dadosImp : []);
+      }
+
+      if (resUsers.ok) {
+        const dadosUsers = await resUsers.json();
+        setUsuarios(Array.isArray(dadosUsers) ? dadosUsers : []);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setCarregando(false);
+    }
+  }
+
+  useEffect(() => {
+    carregarDados();
+  }, []);
+
+  async function atualizarCampoInline(id, campo, valor) {
+    try {
+      const res = await fetch(`${BASE_URL}/novas-implantacoes/${id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ [campo]: valor }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.message || "Erro ao atualizar implantação");
+        return;
+      }
+
+      await carregarDados();
+    } catch (err) {
+      console.error(err);
+      alert("Erro de comunicação com o servidor.");
+    }
+  }
+
+  const listaNormalizada = useMemo(() => {
+    return implantacoes.map((imp) => {
+      const cliente = imp.cliente || {};
+      const matriz = (cliente.empresas || []).find((e) => e.is_matriz) || (cliente.empresas || [])[0] || {};
+      const responsavel = imp.usuario_responsavel || imp.usuarioResponsavel || {};
+
+      const nomeCliente = cliente.nomeFantasia || matriz.razaoSocial || `Cliente #${imp.cliente_id}`;
+      const iniciais = nomeCliente.slice(0, 2).toUpperCase();
+
+      const faseAtual = extrairMetadado(imp.observacao, "Fase", imp.status === "F" ? "Finalizada" : "Coleta de Dados");
+      const prioridade = extrairMetadado(imp.observacao, "Prioridade", "Alta");
+      const dataGoLive = extrairMetadado(imp.observacao, "Go-Live", cliente.dataFinImpl || "");
+      const dataInicio = cliente.dataIniImpl || imp.created_at?.slice(0, 10) || "";
+      const dataAssinatura = cliente.dataAssContrato || dataInicio;
+
+      const diasRestantes = calcularDiasRestantes(dataGoLive);
+
+      let totalTarefas = 0;
+      let tarefasConcluidas = 0;
+      if (Array.isArray(imp.checklists)) {
+        imp.checklists.forEach((chk) => {
+          if (Array.isArray(chk.itens)) {
+            totalTarefas += chk.itens.length;
+            tarefasConcluidas += chk.itens.filter((item) => item.concluido).length;
+          }
+        });
+      }
+
+      const progresso = totalTarefas > 0 ? Math.round((tarefasConcluidas / totalTarefas) * 100) : 0;
+
+      return {
+        idRaw: imp.id,
+        idFormatado: `IMP-${String(imp.id).padStart(4, "0")}`,
+        clienteNome: nomeCliente,
+        clienteIniciais: iniciais,
+        dominio: cliente.dominio || "—",
+        plano: cliente.plano?.nome || "Starter",
+        responsavelId: imp.responsavel,
+        responsavelNome: responsavel.nome || "Não atribuído",
+        fase: faseAtual,
+        prioridade,
+        dataInicio,
+        dataAssinatura,
+        dataGoLive,
+        diasRestantes,
+        atrasado: diasRestantes !== null && diasRestantes < 0,
+        totalTarefas,
+        tarefasConcluidas,
+        progresso,
+        createdAt: imp.created_at,
+        integracoes: extrairMetadado(imp.observacao, "Integrações", ""),
+      };
+    });
+  }, [implantacoes]);
+
+  const filtrados = useMemo(() => {
+    return listaNormalizada
+      .filter((i) => {
+        if (statusFilter !== "Todos" && statusFilter !== "Em Andamento") {
+          if (i.fase !== statusFilter) return false;
+        }
+        if (statusFilter === "Em Andamento" && i.fase === "Finalizada") return false;
+        if (priorityFilter !== "Todas" && i.prioridade !== priorityFilter) return false;
+        if (assigneeFilter !== "Todos" && String(i.responsavelId) !== String(assigneeFilter)) return false;
+        if (clientSearch && !i.clienteNome.toLowerCase().includes(clientSearch.toLowerCase())) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        if (ordenacao === "prazo") {
+          if (a.diasRestantes === null) return 1;
+          if (b.diasRestantes === null) return -1;
+          return a.diasRestantes - b.diasRestantes;
+        }
+        if (ordenacao === "progresso") {
+          return b.progresso - a.progresso;
+        }
+        return b.idRaw - a.idRaw;
+      });
+  }, [listaNormalizada, statusFilter, priorityFilter, assigneeFilter, clientSearch, ordenacao]);
+
+  const totalEmAndamento = listaNormalizada.filter((i) => i.fase !== "Finalizada").length;
+  const totalFinalizadas = listaNormalizada.filter((i) => i.fase === "Finalizada").length;
 
   return (
     <div className="flex flex-1 overflow-hidden" style={{ background: "#F4F6F9" }}>
-      {/* Main feed */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Header */}
         <div className="px-6 py-4 border-b bg-white flex-shrink-0" style={{ borderColor: "#E2E8F0" }}>
@@ -59,21 +208,22 @@ export default function Implantacoes({ initialStatus, onViewImplantacao, onNovaI
                 🚀 Projetos de Implantação
               </h1>
               <span className="px-2.5 py-0.5 rounded-full text-sm font-bold" style={{ background: "#0B2847", color: "#fff" }}>
-                {emAndamento}
+                {totalEmAndamento}
               </span>
               <span className="px-2.5 py-0.5 rounded-full text-xs font-medium" style={{ background: "#ECFDF5", color: "#10B981" }}>
-                Finalizadas no Mês: {finalizadasMes}
+                Finalizadas: {totalFinalizadas}
               </span>
             </div>
             <button
               onClick={onNovaImplantacao}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all cursor-pointer"
+              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all cursor-pointer shadow-xs"
               style={{ background: "#F26522" }}
               onMouseEnter={(e) => { e.currentTarget.style.background = "#d4541a"; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = "#F26522"; }}
             >
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+                <line x1="12" y1="5" x2="12" y2="19" />
+                <line x1="5" y1="12" x2="19" y2="12" />
               </svg>
               Nova Implantação
             </button>
@@ -85,26 +235,39 @@ export default function Implantacoes({ initialStatus, onViewImplantacao, onNovaI
                 className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
                 style={{ background: "#EBF4FF", color: "#0066CC" }}
               >
-                Status: {statusFilter}
-                <button onClick={() => setStatusFilter("Todos")}>
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
+                Fase: {statusFilter}
+                <button onClick={() => setStatusFilter("Todos")} className="cursor-pointer">
+                  ✕
                 </button>
               </span>
             )}
-            <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium" style={{ background: "#EBF4FF", color: "#0066CC" }}>
-              Responsável: {CURRENT_USER.name}
-            </span>
+
+            {assigneeFilter !== "Todos" && (
+              <span
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium"
+                style={{ background: "#EBF4FF", color: "#0066CC" }}
+              >
+                Responsável: {usuarios.find((u) => String(u.id) === String(assigneeFilter))?.nome || assigneeFilter}
+                <button onClick={() => setAssigneeFilter("Todos")} className="cursor-pointer">
+                  ✕
+                </button>
+              </span>
+            )}
+
             <div className="ml-auto flex items-center gap-2">
-              <select className="text-xs border rounded-lg px-2 py-1.5 outline-none" style={{ borderColor: "#E2E8F0", color: "#64748B" }}>
-                <option>Ordenar por: Prazo para Go-Live ▾</option>
-                <option>Ordenar por: Progresso</option>
-                <option>Ordenar por: Criação</option>
+              <select
+                value={ordenacao}
+                onChange={(e) => setOrdenacao(e.target.value)}
+                className="text-xs border rounded-lg px-2.5 py-1.5 outline-none bg-white cursor-pointer"
+                style={{ borderColor: "#E2E8F0", color: "#64748B" }}
+              >
+                <option value="prazo">Ordenar por: Prazo de Go-Live</option>
+                <option value="progresso">Ordenar por: Progresso</option>
+                <option value="criacao">Ordenar por: Recentes</option>
               </select>
               <button
                 onClick={() => setShowFilters(!showFilters)}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors"
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors cursor-pointer"
                 style={{
                   borderColor: showFilters ? "#0066CC" : "#E2E8F0",
                   color: showFilters ? "#0066CC" : "#64748B",
@@ -120,191 +283,205 @@ export default function Implantacoes({ initialStatus, onViewImplantacao, onNovaI
           </div>
         </div>
 
-        {/* Cards */}
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
-          {filtered.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-20 text-center">
-              <div className="text-5xl mb-3">🚀</div>
-              <p className="font-medium" style={{ color: "#1E293B" }}>Nenhuma implantação encontrada</p>
+        {/* Lista */}
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-3">
+          {carregando && (
+            <div className="text-center py-16 text-sm text-[#64748B]">
+              Carregando projetos de implantação...
             </div>
           )}
 
-          {filtered.map((imp) => {
-            const progress = Math.round((imp.tasksDone / imp.tasksTotal) * 100);
-            const statusStyle = STATUS_COLORS[imp.status] || { bg: "#F1F5F9", color: "#64748B" };
+          {!carregando && filtrados.length === 0 && (
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <div className="text-5xl mb-3">🚀</div>
+              <p className="font-semibold text-base" style={{ color: "#1E293B" }}>
+                Nenhuma implantação cadastrada no sistema.
+              </p>
+              <p className="text-xs text-[#64748B] mt-1">
+                Clique no botão "Nova Implantação" acima para cadastrar o primeiro onboarding.
+              </p>
+            </div>
+          )}
 
-            return (
-              <div
-                key={imp.id}
-                className="bg-white rounded-xl border flex items-stretch overflow-hidden cursor-pointer transition-all duration-150 group"
-                style={{ borderColor: "#E2E8F0", boxShadow: "0 1px 2px rgba(0,0,0,0.04)" }}
-                onMouseEnter={(e) => {
-                  e.currentTarget.style.boxShadow = "0 4px 12px rgba(0,0,0,0.08)";
-                  e.currentTarget.style.borderColor = "#0066CC";
-                }}
-                onMouseLeave={(e) => {
-                  e.currentTarget.style.boxShadow = "0 1px 2px rgba(0,0,0,0.04)";
-                  e.currentTarget.style.borderColor = "#E2E8F0";
-                }}
-                onClick={() => onViewImplantacao(imp.id)}
-              >
-                {/* Left priority bar */}
-                <div className="w-1 flex-shrink-0" style={{ background: PRIORITY_COLORS[imp.priority] }} />
+          {!carregando &&
+            filtrados.map((imp) => {
+              const statusStyle = STATUS_COLORS[imp.fase] || { bg: "#F1F5F9", color: "#64748B" };
 
-                {/* Checkbox */}
-                <div className="flex items-center px-3" onClick={(e) => e.stopPropagation()}>
-                  <input type="checkbox" className="rounded" />
-                </div>
-
-                {/* Avatar */}
-                <div className="flex items-center px-3">
+              return (
+                <div
+                  key={imp.idRaw}
+                  className="bg-white rounded-xl border flex items-stretch overflow-hidden cursor-pointer transition-all duration-150 group shadow-2xs hover:shadow-md"
+                  style={{ borderColor: "#E2E8F0" }}
+                  onClick={() => onViewImplantacao && onViewImplantacao(imp.idRaw)}
+                >
                   <div
-                    className="w-10 h-10 rounded-full flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
-                    style={{ background: "#0B2847" }}
-                  >
-                    {imp.clientInitials}
-                  </div>
-                </div>
+                    className="w-1.5 flex-shrink-0"
+                    style={{ background: PRIORITY_COLORS[imp.prioridade] || "#0066CC" }}
+                  />
 
-                {/* Content */}
-                <div className="flex-1 py-3.5 px-2 min-w-0">
-                  {/* Line 1 */}
-                  <div className="flex items-center gap-2 mb-1.5 flex-wrap">
-                    <span className="font-semibold text-sm" style={{ color: "#1E293B" }}>{imp.client}</span>
-                    <span className="text-xs" style={{ color: "#64748B" }}>{imp.id}</span>
-                    <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: "#EBF4FF", color: "#0066CC" }}>
-                      {imp.plan}
-                    </span>
-                    <span className="text-xs" style={{ color: "#64748B" }}>🌐 {imp.domain}</span>
-                  </div>
-
-                  {/* Line 2 */}
-                  <div className="flex items-center gap-3 mb-2 flex-wrap">
-                    <span className="text-xs" style={{ color: "#64748B" }}>Início: {imp.startDate}</span>
-                    <span className="text-xs" style={{ color: "#64748B" }}>Assinatura: {imp.signatureDate}</span>
-                    {imp.integrations.map((int) => {
-                      const ic = INTEGRATION_COLORS[int] || { bg: "#F1F5F9", color: "#64748B" };
-                      return (
-                        <span key={int} className="text-[11px] font-medium px-1.5 py-0.5 rounded" style={ic}>
-                          {int}
-                        </span>
-                      );
-                    })}
-                    <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: "#F1F5F9", color: "#64748B" }}>
-                      📦 {imp.tablesCount} Tabelas
-                    </span>
-                  </div>
-
-                  {/* Line 3: Progress */}
-                  <div className="flex items-center gap-3">
-                    <div className="flex-1 max-w-48">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-[11px]" style={{ color: "#64748B" }}>
-                          {imp.tasksDone} de {imp.tasksTotal} tarefas
-                        </span>
-                        <span className="text-[11px] font-semibold" style={{ color: "#1E293B" }}>{progress}%</span>
-                      </div>
-                      <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "#E2E8F0" }}>
-                        <div
-                          className="h-full rounded-full transition-all"
-                          style={{
-                            width: `${progress}%`,
-                            background: progress === 100 ? "#10B981" : "#0066CC",
-                          }}
-                        />
-                      </div>
+                  <div className="flex items-center pl-4 pr-2">
+                    <div
+                      className="w-10 h-10 rounded-xl flex items-center justify-center text-xs font-bold text-white flex-shrink-0"
+                      style={{ background: "#0B2847" }}
+                    >
+                      {imp.clienteIniciais}
                     </div>
-                    <span
-                      className="text-xs font-medium px-2 py-0.5 rounded-full"
-                      style={
-                        imp.overdue
-                          ? { background: "#FFF1F2", color: "#E11D48" }
-                          : imp.daysRemaining <= 5
-                          ? { background: "#FFFBEB", color: "#D97706" }
-                          : { background: "#ECFDF5", color: "#10B981" }
-                      }
-                    >
-                      {imp.overdue
-                        ? `⚠️ Atrasado há ${Math.abs(imp.daysRemaining)} dias`
-                        : imp.daysRemaining === 0
-                        ? "🎯 Go-Live hoje!"
-                        : `⏳ ${imp.daysRemaining} dias para Go-Live`}
-                    </span>
-                  </div>
-                </div>
-
-                {/* Right inline selectors */}
-                <div className="flex items-center gap-3 px-4 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
-                  {/* Priority */}
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-2 h-2 rounded-full" style={{ background: PRIORITY_COLORS[imp.priority] }} />
-                    <select
-                      className="text-xs border-none bg-transparent outline-none cursor-pointer font-medium"
-                      style={{ color: PRIORITY_COLORS[imp.priority] }}
-                      defaultValue={imp.priority}
-                    >
-                      <option>Alta</option><option>Média</option><option>Baixa</option>
-                    </select>
                   </div>
 
-                  <div className="h-6 w-px" style={{ background: "#E2E8F0" }} />
+                  <div className="flex-1 py-3.5 px-3 min-w-0">
+                    <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                      <span className="font-bold text-sm" style={{ color: "#1E293B" }}>
+                        {imp.clienteNome}
+                      </span>
+                      <span className="text-xs font-mono text-slate-500">{imp.idFormatado}</span>
+                      <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">
+                        {imp.plano}
+                      </span>
+                      {imp.dominio && imp.dominio !== "—" && (
+                        <span className="text-xs text-[#64748B]">🌐 {imp.dominio}</span>
+                      )}
+                    </div>
 
-                  {/* Assignee */}
-                  <select
-                    className="text-xs border-none bg-transparent outline-none cursor-pointer max-w-[120px]"
-                    style={{ color: "#64748B" }}
-                    defaultValue={imp.assignee}
+                    <div className="flex items-center gap-3 mb-2.5 flex-wrap text-xs text-[#64748B]">
+                      <span>Início: <strong>{formatarDataBR(imp.dataInicio)}</strong></span>
+                      <span>Assinatura: <strong>{formatarDataBR(imp.dataAssinatura)}</strong></span>
+                      {imp.integracoes && (
+                        <span className="px-2 py-0.5 rounded bg-purple-50 text-purple-700 text-[11px] font-medium">
+                          🔗 {imp.integracoes}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center gap-4 flex-wrap">
+                      <div className="flex-1 max-w-xs">
+                        <div className="flex items-center justify-between mb-1 text-[11px]">
+                          <span style={{ color: "#64748B" }}>
+                            {imp.totalTarefas > 0
+                              ? `${imp.tarefasConcluidas} de ${imp.totalTarefas} tarefas concluídas`
+                              : "Checklist pendente"}
+                          </span>
+                          <span className="font-bold" style={{ color: "#1E293B" }}>
+                            {imp.progresso}%
+                          </span>
+                        </div>
+                        <div className="h-1.5 rounded-full overflow-hidden bg-slate-100">
+                          <div
+                            className="h-full rounded-full transition-all"
+                            style={{
+                              width: `${imp.progresso}%`,
+                              background: imp.progresso === 100 ? "#10B981" : "#0066CC",
+                            }}
+                          />
+                        </div>
+                      </div>
+
+                      <span
+                        className="text-xs font-semibold px-2.5 py-1 rounded-full"
+                        style={
+                          imp.atrasado
+                            ? { background: "#FFF1F2", color: "#E11D48" }
+                            : imp.diasRestantes !== null && imp.diasRestantes <= 5
+                            ? { background: "#FFFBEB", color: "#D97706" }
+                            : { background: "#ECFDF5", color: "#10B981" }
+                        }
+                      >
+                        {imp.diasRestantes === null
+                          ? "Sem data de Go-Live"
+                          : imp.atrasado
+                          ? `⚠️ Atrasado há ${Math.abs(imp.diasRestantes)} dias`
+                          : imp.diasRestantes === 0
+                          ? "🎯 Go-Live hoje!"
+                          : `⏳ ${imp.diasRestantes} dias para Go-Live`}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div
+                    className="flex items-center gap-3 px-4 flex-shrink-0 bg-[#FAFBFC] border-l"
+                    style={{ borderColor: "#E2E8F0" }}
+                    onClick={(e) => e.stopPropagation()}
                   >
-                    <option>Régis Rinaldi</option>
-                    <option>Ana Paula Costa</option>
-                    <option>Carlos Mendes</option>
-                  </select>
+                    <div>
+                      <label className="text-[10px] uppercase font-bold block text-slate-400 mb-0.5">
+                        Responsável
+                      </label>
+                      <select
+                        value={imp.responsavelId || ""}
+                        onChange={(e) =>
+                          atualizarCampoInline(imp.idRaw, "responsavel", e.target.value ? Number(e.target.value) : null)
+                        }
+                        className="text-xs border rounded-md px-2 py-1 bg-white outline-none cursor-pointer font-medium max-w-[130px]"
+                        style={{ borderColor: "#CBD5E1", color: "#1E293B" }}
+                      >
+                        <option value="">Não atribuído</option>
+                        {usuarios.map((u) => (
+                          <option key={u.id} value={u.id}>
+                            {u.nome}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
 
-                  <div className="h-6 w-px" style={{ background: "#E2E8F0" }} />
-
-                  {/* Status */}
-                  <select
-                    className="text-xs font-medium border-none bg-transparent outline-none cursor-pointer"
-                    style={{ color: statusStyle.color }}
-                    defaultValue={imp.status}
-                  >
-                    {STATUS_STAGES.map((s) => <option key={s}>{s}</option>)}
-                  </select>
+                    <div>
+                      <label className="text-[10px] uppercase font-bold block text-slate-400 mb-0.5">
+                        Fase Atual
+                      </label>
+                      <span
+                        className="text-xs font-semibold px-2.5 py-1 rounded-md block text-center"
+                        style={statusStyle}
+                      >
+                        {imp.fase}
+                      </span>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            );
-          })}
+              );
+            })}
         </div>
       </div>
 
-      {/* Filter panel */}
+      {/* Painel lateral de filtros */}
       {showFilters && (
-        <div className="w-72 flex-shrink-0 flex flex-col border-l overflow-y-auto" style={{ background: "#fff", borderColor: "#E2E8F0" }}>
+        <div
+          className="w-72 flex-shrink-0 flex flex-col border-l bg-white overflow-y-auto"
+          style={{ borderColor: "#E2E8F0" }}
+        >
           <div className="flex items-center justify-between px-4 py-4 border-b" style={{ borderColor: "#E2E8F0" }}>
-            <span className="font-semibold text-sm" style={{ color: "#1E293B" }}>Filtros de Implantação</span>
+            <span className="font-bold text-sm text-[#1E293B]">Filtros de Implantação</span>
             <button
-              className="text-xs font-medium"
-              style={{ color: "#0066CC" }}
-              onClick={() => { setStatusFilter("Todos"); setPriorityFilter("Todas"); setClientSearch(""); }}
+              className="text-xs font-semibold text-[#0066CC] hover:underline cursor-pointer"
+              onClick={() => {
+                setStatusFilter("Todos");
+                setPriorityFilter("Todas");
+                setAssigneeFilter("Todos");
+                setClientSearch("");
+              }}
             >
-              Limpar Filtros
+              Limpar Tudo
             </button>
           </div>
 
-          <div className="flex-1 overflow-y-auto px-4 py-4 space-y-5">
-            <FilterSection label="Responsável">
-              <select className="w-full text-xs border rounded-lg px-3 py-2 outline-none" style={{ borderColor: "#E2E8F0", color: "#1E293B" }} defaultValue={CURRENT_USER.name}>
-                <option>Régis Rinaldi</option>
-                <option>Ana Paula Costa</option>
-                <option>Carlos Mendes</option>
-                <option>Todos</option>
+          <div className="p-4 space-y-5">
+            <FilterSection label="Responsável da Equipe">
+              <select
+                value={assigneeFilter}
+                onChange={(e) => setAssigneeFilter(e.target.value)}
+                className="w-full text-xs border rounded-lg px-3 py-2 outline-none bg-white cursor-pointer"
+                style={{ borderColor: "#CBD5E1", color: "#1E293B" }}
+              >
+                <option value="Todos">Todos os analistas</option>
+                {usuarios.map((u) => (
+                  <option key={u.id} value={u.id}>
+                    {u.nome} ({u.setor})
+                  </option>
+                ))}
               </select>
             </FilterSection>
 
-            <FilterSection label="Status do Onboarding">
+            <FilterSection label="Fase do Onboarding">
               <div className="space-y-1.5">
                 {["Todos", ...STATUS_STAGES].map((s) => (
-                  <label key={s} className="flex items-center gap-2 cursor-pointer">
+                  <label key={s} className="flex items-center gap-2 cursor-pointer text-xs text-[#1E293B]">
                     <input
                       type="radio"
                       name="imp-status"
@@ -313,10 +490,10 @@ export default function Implantacoes({ initialStatus, onViewImplantacao, onNovaI
                       onChange={() => setStatusFilter(s)}
                       className="accent-[#0066CC]"
                     />
-                    <span className="text-xs" style={{ color: "#1E293B" }}>{s}</span>
-                    {s !== "Todos" && STATUS_COLORS[s] && (
-                      <span className="ml-auto text-[10px] font-medium px-1.5 py-0.5 rounded-full" style={STATUS_COLORS[s]}>
-                        {IMPLANTACOES.filter((i) => i.status === s).length}
+                    <span>{s}</span>
+                    {s !== "Todos" && (
+                      <span className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600">
+                        {listaNormalizada.filter((i) => i.fase === s).length}
                       </span>
                     )}
                   </label>
@@ -324,27 +501,28 @@ export default function Implantacoes({ initialStatus, onViewImplantacao, onNovaI
               </div>
             </FilterSection>
 
-            <FilterSection label="Nome do Cliente">
+            <FilterSection label="Buscar por Cliente">
               <input
                 type="text"
-                placeholder="Buscar cliente..."
+                placeholder="Nome do cliente..."
                 value={clientSearch}
                 onChange={(e) => setClientSearch(e.target.value)}
-                className="w-full text-xs border rounded-lg px-3 py-2 outline-none"
-                style={{ borderColor: "#E2E8F0", color: "#1E293B" }}
+                className="w-full text-xs border rounded-lg px-3 py-2 outline-none bg-white"
+                style={{ borderColor: "#CBD5E1", color: "#1E293B" }}
               />
             </FilterSection>
 
-            <FilterSection label="Prioridade">
-              <div className="flex gap-2">
+            <FilterSection label="Nível de Prioridade">
+              <div className="grid grid-cols-2 gap-1.5">
                 {["Todas", "Alta", "Média", "Baixa"].map((p) => (
                   <button
                     key={p}
+                    type="button"
                     onClick={() => setPriorityFilter(p)}
-                    className="flex-1 px-2 py-1 rounded-full text-xs font-medium border transition-colors"
+                    className="py-1.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer"
                     style={{
                       borderColor: priorityFilter === p ? (PRIORITY_COLORS[p] || "#0066CC") : "#E2E8F0",
-                      background: priorityFilter === p ? `${PRIORITY_COLORS[p] || "#0066CC"}18` : "transparent",
+                      background: priorityFilter === p ? `${PRIORITY_COLORS[p] || "#0066CC"}15` : "transparent",
                       color: priorityFilter === p ? (PRIORITY_COLORS[p] || "#0066CC") : "#64748B",
                     }}
                   >
@@ -353,46 +531,6 @@ export default function Implantacoes({ initialStatus, onViewImplantacao, onNovaI
                 ))}
               </div>
             </FilterSection>
-
-            <FilterSection label="Sistemas Integrados">
-              <div className="flex flex-wrap gap-1.5">
-                {["Bling", "Tiny", "Protheus", "VTEX", "WooCommerce", "SAP"].map((s) => {
-                  const ic = INTEGRATION_COLORS[s] || { bg: "#F1F5F9", color: "#64748B" };
-                  return (
-                    <button key={s} className="px-2 py-0.5 rounded text-[11px] font-medium" style={ic}>
-                      {s}
-                    </button>
-                  );
-                })}
-              </div>
-            </FilterSection>
-
-            <FilterSection label="Prazo para Go-Live (SLA)">
-              <select className="w-full text-xs border rounded-lg px-3 py-2 outline-none" style={{ borderColor: "#E2E8F0", color: "#1E293B" }}>
-                <option>Qualquer período</option>
-                <option>No prazo</option>
-                <option>Próximo do limite (5 dias)</option>
-                <option>Vencido / Atrasado</option>
-              </select>
-            </FilterSection>
-
-            <FilterSection label="Data Inicial">
-              <div className="grid grid-cols-2 gap-2">
-                <input type="date" className="text-xs border rounded-lg px-2 py-1.5 outline-none" style={{ borderColor: "#E2E8F0", color: "#1E293B" }} />
-                <input type="date" className="text-xs border rounded-lg px-2 py-1.5 outline-none" style={{ borderColor: "#E2E8F0", color: "#1E293B" }} />
-              </div>
-            </FilterSection>
-          </div>
-
-          <div className="p-4 border-t" style={{ borderColor: "#E2E8F0" }}>
-            <button
-              className="w-full py-2.5 rounded-lg text-sm font-semibold text-white"
-              style={{ background: "#0066CC" }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = "#0054a8"; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = "#0066CC"; }}
-            >
-              Aplicar Filtros
-            </button>
           </div>
         </div>
       )}
@@ -403,7 +541,7 @@ export default function Implantacoes({ initialStatus, onViewImplantacao, onNovaI
 function FilterSection({ label, children }) {
   return (
     <div>
-      <div className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "#64748B" }}>{label}</div>
+      <div className="text-[11px] font-bold uppercase tracking-wider mb-2 text-[#64748B]">{label}</div>
       {children}
     </div>
   );

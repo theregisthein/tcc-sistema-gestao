@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class ChecklistItem extends Model
@@ -19,7 +20,7 @@ class ChecklistItem extends Model
 
     protected $casts = [
         'concluido' => 'boolean',
-        'ordem' => 'integer',
+        'ordem'     => 'integer',
     ];
 
     public function checklist()
