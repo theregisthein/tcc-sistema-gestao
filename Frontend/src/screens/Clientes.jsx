@@ -485,6 +485,91 @@ function EmpresasSection({
   )
 }
 
+// 🧩 Seleção dos Módulos Contratados (Estilo igual ao de Transportadoras, no item 2)
+function ModulosSelector({ disponiveis = [], selecionados = [], aoAlterar }) {
+  const [selecionadoId, setSelecionadoId] = useState("")
+
+  function handleVincular() {
+    if (!selecionadoId) return
+    const idNum = Number(selecionadoId)
+    if (selecionados.some((m) => m.id === idNum)) return
+    const modObj = disponiveis.find((m) => m.id === idNum)
+    if (modObj) {
+      aoAlterar([...selecionados, modObj])
+      setSelecionadoId("")
+    }
+  }
+
+  function handleDesvincular(id) {
+    aoAlterar(selecionados.filter((m) => m.id !== id))
+  }
+
+  return (
+    <div className="space-y-3 pt-2">
+      <div>
+        <label className="text-xs font-medium block mb-1.5" style={{ color: "#64748B" }}>
+          Módulos Adicionais Contratados ({selecionados.length})
+        </label>
+        <div className="flex gap-2">
+          <select
+            value={selecionadoId}
+            onChange={(e) => setSelecionadoId(e.target.value)}
+            className="flex-1 text-xs border rounded-lg px-3 py-2 outline-none bg-white font-medium"
+            style={{ borderColor: "#E2E8F0", color: "#1E293B" }}
+          >
+            <option value="">Selecione um módulo para adicionar...</option>
+            {disponiveis
+              .filter((d) => !selecionados.some((s) => s.id === d.id))
+              .map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.nome} — {formatMoneyBRL(m.valor)}
+                </option>
+              ))}
+          </select>
+          <button
+            type="button"
+            onClick={handleVincular}
+            disabled={!selecionadoId}
+            className="px-4 py-2 rounded-lg text-xs font-semibold text-white cursor-pointer disabled:opacity-50 shadow-xs"
+            style={{ background: "#0066CC" }}
+          >
+            Vincular
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {selecionados.map((m) => (
+          <div
+            key={m.id}
+            className="flex items-center justify-between p-2.5 rounded-xl border bg-white shadow-2xs"
+            style={{ borderColor: "#E2E8F0" }}
+          >
+            <div className="min-w-0 pr-2">
+              <div className="text-xs font-bold text-[#1E293B] truncate">{m.nome}</div>
+              <div className="text-[11px] font-semibold text-emerald-600">{formatMoneyBRL(m.valor)}</div>
+            </div>
+            <button
+              type="button"
+              onClick={() => handleDesvincular(m.id)}
+              className="text-slate-400 hover:text-red-600 p-1 rounded-lg cursor-pointer flex-shrink-0"
+              title="Desvincular módulo"
+            >
+              ✕
+            </button>
+          </div>
+        ))}
+
+        {selecionados.length === 0 && (
+          <div className="col-span-full p-3 rounded-lg border border-dashed text-center bg-[#F8FAFC]" style={{ borderColor: "#CBD5E1" }}>
+            <p className="text-xs text-[#94A3B8]">Nenhum módulo adicional contratado por este cliente.</p>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 // 🚚 Seleção das Transportadoras cadastradas da tabela `transportadora`
 function TransportadorasSelector({ disponiveis = [], selecionadas = [], aoAlterar }) {
   const [selecionadaId, setSelecionadaId] = useState("")
@@ -530,7 +615,7 @@ function TransportadorasSelector({ disponiveis = [], selecionadas = [], aoAltera
             .filter((d) => !selecionadas.some((s) => s.id === d.id))
             .map((t) => (
               <option key={t.id} value={t.id}>
-                {t.nome} - CNPJ: {maskCNPJ(t.cnpj)}
+                {t.nome} — CNPJ: {maskCNPJ(t.cnpj)}
               </option>
             ))}
         </select>
@@ -661,6 +746,7 @@ function FichaClienteModal({
   onSave,
   planosList = [],
   transportadorasList = [],
+  modulosList = [],
   onEmpresaAdded,
   onEmpresaUpdated,
   onEmpresaDeleted,
@@ -680,6 +766,7 @@ function FichaClienteModal({
     valorContaFrete: client?.valorContaFrete ? formatMoneyBRL(client.valorContaFrete) : "R$ 0,00",
     status: client?.status || "A",
     plano_id: client?.plano_id || (planosList[0]?.id ?? ""),
+    modulos: Array.isArray(client?.modulos) ? client.modulos : [],
     transportadoras: Array.isArray(client?.transportadoras) ? client.transportadoras : [],
     contatos: Array.isArray(client?.contatos) ? client.contatos : [],
     empresas: Array.isArray(client?.empresas) ? client.empresas : [],
@@ -700,6 +787,7 @@ function FichaClienteModal({
         valorContaFrete: client.valorContaFrete ? formatMoneyBRL(client.valorContaFrete) : "R$ 0,00",
         status: client.status || "A",
         plano_id: client.plano_id || (planosList[0]?.id ?? ""),
+        modulos: Array.isArray(client.modulos) ? client.modulos : [],
         transportadoras: Array.isArray(client.transportadoras) ? client.transportadoras : [],
         contatos: Array.isArray(client.contatos) ? client.contatos : [],
         empresas: Array.isArray(client.empresas) ? client.empresas : [],
@@ -819,8 +907,9 @@ function FichaClienteModal({
                 </div>
               </div>
 
-              <div>
-                <h3 className="text-sm font-bold mb-3 text-[#1E293B]">2. Plano & Faturamento</h3>
+              {/* Item 2 com Seleção de Plano, Faturamento e Módulos */}
+              <div className="space-y-3">
+                <h3 className="text-sm font-bold text-[#1E293B]">2. Plano & Faturamento</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
                     <label className="text-xs font-medium block mb-1.5" style={{ color: "#64748B" }}>
@@ -835,7 +924,7 @@ function FichaClienteModal({
                       <option value="">Selecione um plano...</option>
                       {planosList.map((p) => (
                         <option key={p.id} value={p.id}>
-                          {p.nome} - {formatMoneyBRL(p.valor)}
+                          {p.nome} — {formatMoneyBRL(p.valor)}
                         </option>
                       ))}
                     </select>
@@ -860,6 +949,13 @@ function FichaClienteModal({
                     onChange={(v) => update("valorContaFrete", v)}
                   />
                 </div>
+
+                {/* Módulos contratados inseridos no item 2 */}
+                <ModulosSelector
+                  disponiveis={modulosList}
+                  selecionados={form.modulos}
+                  aoAlterar={(novos) => update("modulos", novos)}
+                />
               </div>
 
               <div>
@@ -979,6 +1075,7 @@ export default function Clientes() {
   const [clients, setClients] = useState([])
   const [planos, setPlanos] = useState([])
   const [transportadoras, setTransportadoras] = useState([])
+  const [modulos, setModulos] = useState([])
   const [loading, setLoading] = useState(false)
   const [search, setSearch] = useState("")
   const [planFilter, setPlanFilter] = useState("Todos")
@@ -995,15 +1092,17 @@ export default function Clientes() {
   const carregarDados = async () => {
     setLoading(true)
     try {
-      const [resPlanos, resClientes, resTransp] = await Promise.all([
+      const [resPlanos, resClientes, resTransp, resModulos] = await Promise.all([
         fetch(`${BASE_URL}/planos`),
         fetch(`${BASE_URL}/clientes`),
         fetch(`${BASE_URL}/transportadoras`),
+        fetch(`${BASE_URL}/modulos`),
       ])
 
       if (resPlanos.ok) setPlanos(await resPlanos.json())
       if (resClientes.ok) setClients(await resClientes.json())
       if (resTransp.ok) setTransportadoras(await resTransp.json())
+      if (resModulos.ok) setModulos(await resModulos.json())
     } catch (err) {
       console.error("Erro ao carregar dados:", err)
     } finally {
@@ -1030,6 +1129,7 @@ export default function Clientes() {
       dataIniImpl: new Date().toISOString().slice(0, 10),
       dataFinImpl: "",
       empresas: [],
+      modulos: [],
       transportadoras: [],
       contatos: [],
     })
@@ -1059,7 +1159,8 @@ export default function Clientes() {
           dataFinImpl: formData.dataFinImpl || null,
           matrizCnpj: matriz.cnpj,
           matrizRazao: matriz.razaoSocial,
-          transportadora_ids: formData.transportadoras.map((t) => t.id),
+          transportadora_ids: (formData.transportadoras || []).map((t) => t.id),
+          modulo_ids: (formData.modulos || []).map((m) => m.id),
           contatos: formData.contatos,
         }
 
@@ -1106,7 +1207,8 @@ export default function Clientes() {
           dataFimContrato: formData.dataFimContrato || null,
           dataIniImpl: formData.dataIniImpl || null,
           dataFinImpl: formData.dataFinImpl || null,
-          transportadora_ids: formData.transportadoras.map((t) => t.id),
+          transportadora_ids: (formData.transportadoras || []).map((t) => t.id),
+          modulo_ids: (formData.modulos || []).map((m) => m.id),
           contatos: formData.contatos,
         }
 
@@ -1480,6 +1582,7 @@ export default function Clientes() {
           onSave={handleSalvarModal}
           planosList={planos}
           transportadorasList={transportadoras}
+          modulosList={modulos}
           onEmpresaAdded={handleEmpresaAdded}
           onEmpresaUpdated={handleEmpresaUpdated}
           onEmpresaDeleted={handleEmpresaDeleted}

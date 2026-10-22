@@ -11,6 +11,8 @@ use App\Http\Controllers\PrioridadeConfigController;
 use App\Http\Controllers\PlanoController;
 use App\Http\Controllers\ClienteEmpresaController;
 use App\Http\Controllers\ClienteController;
+use App\Http\Controllers\UsuarioController;
+use App\Http\Controllers\ModuloController;
 
 use Illuminate\Support\Facades\Route;
 
@@ -33,3 +35,7 @@ Route::apiResource('planos', PlanoController::class);
 Route::apiResource('cliente-empresas', ClienteEmpresaController::class);
 
 Route::apiResource('clientes', ClienteController::class);
+
+Route::apiResource('usuarios', UsuarioController::class);
+
+Route::apiResource('modulos', ModuloController::class);

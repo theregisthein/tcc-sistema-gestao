@@ -11,19 +11,19 @@ use Illuminate\Support\Facades\DB;
 class ClienteController extends Controller
 {
     /**
-     * Listagem de clientes com suas empresas, plano, contatos e transportadoras.
+     * Listagem de clientes com suas empresas, plano, contatos, transportadoras e módulos.
      */
     public function index()
     {
         try {
-            // Tenta carregar com todas as relações
-            $clientes = Cliente::with(['empresas', 'plano', 'contatos', 'transportadoras'])
+            // Carrega com todas as relações ativas
+            $clientes = Cliente::with(['empresas', 'plano', 'contatos', 'transportadoras', 'modulos'])
                 ->orderBy('id', 'desc')
                 ->get();
             return response()->json($clientes);
         } catch (\Throwable $e) {
             try {
-                // Fallback 1: se transportadoras ou contatos deram erro de SQL/Model, carrega ao menos empresas e plano
+                // Fallback 1: se transportadoras, contatos ou modulos falharem, carrega empresas e plano
                 $clientes = Cliente::with(['empresas', 'plano'])
                     ->orderBy('id', 'desc')
                     ->get();
@@ -34,6 +34,7 @@ class ClienteController extends Controller
             }
         }
     }
+
     /**
      * Cadastro do Cliente junto com a sua primeira empresa (Matriz).
      */
@@ -56,8 +57,9 @@ class ClienteController extends Controller
             'matrizCnpj'          => 'required|string|max:20|unique:cliente_empresa,cnpj',
             'matrizRazao'         => 'required|string|max:250',
             
-            // Opcionais no cadastro inicial
+            // Relações opcionais no cadastro inicial
             'transportadora_ids'  => 'nullable|array',
+            'modulo_ids'          => 'nullable|array',
             'contatos'            => 'nullable|array',
         ], [
             'nomeFantasia.required' => 'O Nome Fantasia é obrigatório.',
@@ -99,7 +101,12 @@ class ClienteController extends Controller
                     $cliente->transportadoras()->sync($validated['transportadora_ids']);
                 }
 
-                // 4. Salva Contatos se enviados
+                // 4. Vincula Módulos contratados se enviados
+                if (!empty($validated['modulo_ids'])) {
+                    $cliente->modulos()->sync($validated['modulo_ids']);
+                }
+
+                // 5. Salva Contatos se enviados
                 if (!empty($validated['contatos'])) {
                     foreach ($validated['contatos'] as $c) {
                         if (!empty($c['nome']) || !empty($c['email'])) {
@@ -112,7 +119,7 @@ class ClienteController extends Controller
                     }
                 }
 
-                return response()->json($cliente->load(['empresas', 'plano', 'contatos', 'transportadoras']), 201);
+                return response()->json($cliente->load(['empresas', 'plano', 'contatos', 'transportadoras', 'modulos']), 201);
             });
         } catch (\Throwable $e) {
             return response()->json([
@@ -132,7 +139,7 @@ class ClienteController extends Controller
     }
 
     /**
-     * Atualiza dados cadastrais, operacionais, contatos e transportadoras do cliente.
+     * Atualiza dados cadastrais, operacionais, contatos, transportadoras e módulos do cliente.
      */
     public function update(Request $request, string $id)
     {
@@ -151,6 +158,7 @@ class ClienteController extends Controller
             'plano_id'            => 'nullable|integer',
             'integracao'          => 'nullable|string|max:500',
             'transportadora_ids'  => 'nullable|array',
+            'modulo_ids'          => 'nullable|array',
             'contatos'            => 'nullable|array',
         ]);
 
@@ -164,6 +172,11 @@ class ClienteController extends Controller
             // Sincroniza a tabela pivô cliente_transportadora
             if (isset($validated['transportadora_ids'])) {
                 $cliente->transportadoras()->sync($validated['transportadora_ids']);
+            }
+
+            // Sincroniza a tabela pivô modulo_cliente
+            if (isset($validated['modulo_ids'])) {
+                $cliente->modulos()->sync($validated['modulo_ids']);
             }
 
             // Sincroniza a tabela contato_cliente (recria os contatos do cliente)
@@ -181,7 +194,7 @@ class ClienteController extends Controller
             }
         });
 
-        return response()->json($cliente->load(['empresas', 'plano', 'contatos', 'transportadoras']));
+        return response()->json($cliente->load(['empresas', 'plano', 'contatos', 'transportadoras', 'modulos']));
     }
 
     /**

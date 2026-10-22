@@ -671,6 +671,246 @@ function CrudPlanosApi() {
   );
 }
 
+// Componente CRUD para Módulos Adicionais do Sistema
+function CrudModulosApi() {
+  const [modulos, setModulos] = useState([]);
+  const [novoNome, setNovoNome] = useState("");
+  const [novoValor, setNovoValor] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [editNome, setEditNome] = useState("");
+  const [editValor, setEditValor] = useState("");
+  const [carregando, setCarregando] = useState(false);
+
+  const carregarModulos = async () => {
+    try {
+      setCarregando(true);
+      const res = await fetch(`${BASE_URL}/modulos`);
+      if (!res.ok) throw new Error("Erro ao carregar módulos");
+      const dados = await res.json();
+      setModulos(dados);
+    } catch (err) {
+      console.error("Erro ao carregar módulos:", err);
+    } finally {
+      setCarregando(false);
+    }
+  };
+
+  useEffect(() => {
+    carregarModulos();
+  }, []);
+
+  async function handleAdd() {
+    const nome = novoNome.trim();
+    const valor = parseFloat(novoValor.replace(",", "."));
+
+    if (!nome || isNaN(valor)) {
+      alert("Informe o nome do módulo e um valor adicional válido.");
+      return;
+    }
+
+    try {
+      const res = await fetch(`${BASE_URL}/modulos`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ nome, valor }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        alert(err.message || "Erro ao adicionar módulo");
+        return;
+      }
+
+      setNovoNome("");
+      setNovoValor("");
+      carregarModulos();
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao conectar com a API de módulos");
+    }
+  }
+
+  function startEdit(item) {
+    setEditingId(item.id);
+    setEditNome(item.nome);
+    setEditValor(item.valor);
+  }
+
+  async function confirmEdit(id) {
+    const nome = editNome.trim();
+    const valor = parseFloat(String(editValor).replace(",", "."));
+
+    if (nome && !isNaN(valor)) {
+      try {
+        const res = await fetch(`${BASE_URL}/modulos/${id}`, {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({ nome, valor }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json();
+          alert(err.message || "Erro ao atualizar módulo");
+          return;
+        }
+
+        carregarModulos();
+      } catch (err) {
+        console.error(err);
+        alert("Erro ao atualizar módulo");
+      }
+    }
+    setEditingId(null);
+  }
+
+  async function handleRemove(id, nome) {
+    if (!window.confirm(`Pretende realmente remover o módulo "${nome}"?`)) return;
+    try {
+      const res = await fetch(`${BASE_URL}/modulos/${id}`, {
+        method: "DELETE",
+        headers: { Accept: "application/json" },
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        alert(data.message || "Não foi possível excluir o módulo.");
+        return;
+      }
+
+      carregarModulos();
+    } catch (err) {
+      console.error(err);
+      alert("Erro ao comunicar com o servidor.");
+    }
+  }
+
+  return (
+    <div>
+      <div className="space-y-1.5 mb-3">
+        {modulos.map((item) => (
+          <div
+            key={item.id}
+            className="flex items-center gap-2 px-3 py-2.5 rounded-xl border bg-white"
+            style={{ borderColor: "#E2E8F0" }}
+          >
+            {editingId === item.id ? (
+              <div className="flex-1 flex gap-2">
+                <input
+                  className="flex-1 text-sm border rounded-lg px-2 py-1 outline-none"
+                  value={editNome}
+                  onChange={(e) => setEditNome(e.target.value)}
+                  placeholder="Nome do módulo"
+                  style={{ borderColor: "#0066CC", color: "#1E293B" }}
+                />
+                <input
+                  type="number"
+                  step="0.01"
+                  className="w-32 text-sm border rounded-lg px-2 py-1 outline-none"
+                  value={editValor}
+                  onChange={(e) => setEditValor(e.target.value)}
+                  placeholder="Valor (R$)"
+                  style={{ borderColor: "#0066CC", color: "#1E293B" }}
+                />
+              </div>
+            ) : (
+              <div className="flex-1 flex items-center justify-between">
+                <div>
+                  <span className="text-sm font-medium" style={{ color: "#1E293B" }}>
+                    {item.nome}
+                  </span>
+                  {item.clientes_count !== undefined && item.clientes_count > 0 && (
+                    <span className="ml-2 text-[11px] text-slate-500 font-medium">
+                      ({item.clientes_count} {item.clientes_count === 1 ? "cliente ativo" : "clientes ativos"})
+                    </span>
+                  )}
+                </div>
+                <span className="text-xs px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 font-semibold border border-blue-200">
+                  {Number(item.valor).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })}
+                </span>
+              </div>
+            )}
+
+            {editingId === item.id ? (
+              <button
+                onClick={() => confirmEdit(item.id)}
+                className="text-xs font-semibold px-2 py-0.5 rounded cursor-pointer"
+                style={{ background: "#ECFDF5", color: "#10B981" }}
+              >
+                ✓ Guardar
+              </button>
+            ) : (
+              <button
+                onClick={() => startEdit(item)}
+                className="text-xs font-medium cursor-pointer"
+                style={{ color: "#0066CC" }}
+              >
+                Editar
+              </button>
+            )}
+
+            {editingId !== item.id && (
+              <button
+                onClick={() => handleRemove(item.id, item.nome)}
+                className="text-xs font-medium cursor-pointer"
+                style={{ color: "#E11D48" }}
+              >
+                Remover
+              </button>
+            )}
+          </div>
+        ))}
+
+        {!carregando && modulos.length === 0 && (
+          <div className="text-xs py-2 text-slate-400">Nenhum módulo registado.</div>
+        )}
+      </div>
+
+      <div className="flex gap-2">
+        <input
+          type="text"
+          placeholder="Nome do módulo (ex: Auditoria de Fretes, Torre de Controle)..."
+          value={novoNome}
+          onChange={(e) => setNovoNome(e.target.value)}
+          className="flex-1 text-sm border rounded-xl px-3 py-2 outline-none"
+          style={{ borderColor: "#E2E8F0", color: "#1E293B" }}
+        />
+        <input
+          type="number"
+          step="0.01"
+          placeholder="Valor mensal (ex: 150.00)..."
+          value={novoValor}
+          onChange={(e) => setNovoValor(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") handleAdd();
+          }}
+          className="w-44 text-sm border rounded-xl px-3 py-2 outline-none"
+          style={{ borderColor: "#E2E8F0", color: "#1E293B" }}
+        />
+        <button
+          onClick={handleAdd}
+          className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-sm font-semibold text-white cursor-pointer"
+          style={{ background: "#0066CC" }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = "#0054a8"; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = "#0066CC"; }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+            <line x1="12" y1="5" x2="12" y2="19" />
+            <line x1="5" y1="12" x2="19" y2="12" />
+          </svg>
+          Adicionar
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // Linha de Prioridade com atribuição dinâmica de cores
 function SlaRowApi({ prioridade, onUpdate }) {
   const [prazo, setPrazo] = useState(prioridade.prazo || "");
@@ -896,6 +1136,14 @@ export default function Configuracoes() {
             Gerencie os planos e seus respectivos valores comerciais para associação no cadastro de clientes.
           </p>
           <CrudPlanosApi />
+        </Section>
+
+        {/* Módulos do Sistema vinculados à tabela modulo */}
+        <Section title="🧩 Módulos Adicionais do Sistema">
+          <p className="text-xs mb-4" style={{ color: "#64748B" }}>
+            Gerencie os módulos e serviços opcionais que podem ser contratados por cada cliente.
+          </p>
+          <CrudModulosApi />
         </Section>
       </div>
     </div>
