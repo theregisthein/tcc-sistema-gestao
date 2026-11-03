@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from "react";
-import { TICKETS } from "../data/mock";
-import { configStore } from "./Configuracoes";
+
+const BASE_URL = "http://localhost:8000/api";
+const STORAGE_URL = "http://localhost:8000/storage";
 
 const STATUS_COLORS = {
   "Aberto": { bg: "#EBF4FF", color: "#0066CC" },
@@ -14,27 +15,24 @@ const PRIORITY_COLORS = {
   "Alta": "#F26522",
   "Média": "#F59E0B",
   "Baixa": "#10B981",
+  "Urgente": "#E11D48",
 };
 
 function formatDateTime(iso) {
+  if (!iso) return "—";
   const d = new Date(iso);
+  if (isNaN(d.getTime())) return "—";
   return d.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 function formatDate(iso) {
   if (!iso) return "—";
   const d = new Date(iso);
+  if (isNaN(d.getTime())) return "—";
   return d.toLocaleDateString("pt-BR");
 }
 
-// Inline editable field with dropdown
-function EditableSelect({
-  label,
-  value,
-  options,
-  onChange,
-  renderValue,
-}) {
+function EditableSelect({ label, value, options = [], onChange, renderValue }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
 
@@ -52,10 +50,10 @@ function EditableSelect({
       <div className="relative" ref={ref}>
         <button
           onClick={() => setOpen(!open)}
-          className="flex items-center gap-1.5 text-xs text-right rounded px-1.5 py-0.5 transition-colors hover:bg-[#F1F5F9] border border-transparent hover:border-[#E2E8F0]"
+          className="flex items-center gap-1.5 text-xs text-right rounded px-1.5 py-0.5 transition-colors hover:bg-[#F1F5F9] border border-transparent hover:border-[#E2E8F0] cursor-pointer"
           style={{ color: "#1E293B" }}
         >
-          {renderValue ? renderValue(value) : <span className="font-medium">{value || "—"}</span>}
+          {renderValue ? renderValue(value) : <span className="font-medium">{value?.nome || value || "—"}</span>}
           <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#94A3B8" strokeWidth="2.5">
             <path d="M6 9l6 6 6-6" />
           </svg>
@@ -63,29 +61,37 @@ function EditableSelect({
 
         {open && (
           <div
-            className="absolute right-0 top-full mt-1 z-50 rounded-xl overflow-hidden shadow-lg border min-w-[160px]"
+            className="absolute right-0 top-full mt-1 z-50 rounded-xl overflow-hidden shadow-lg border min-w-[160px] max-h-56 overflow-y-auto"
             style={{ background: "#fff", borderColor: "#E2E8F0" }}
           >
-            {options.map((opt) => (
-              <button
-                key={opt}
-                onClick={() => { onChange(opt); setOpen(false); }}
-                className="w-full flex items-center gap-2 px-3 py-2 text-xs text-left hover:bg-[#F4F6F9] transition-colors"
-                style={{
-                  background: opt === value ? "#F4F6F9" : "transparent",
-                  fontWeight: opt === value ? 600 : 400,
-                  color: "#1E293B",
-                }}
-              >
-                {opt === value && (
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#0066CC" strokeWidth="3">
-                    <polyline points="20 6 9 17 4 12" />
-                  </svg>
-                )}
-                {opt !== value && <span className="w-2.5" />}
-                {opt}
-              </button>
-            ))}
+            {options.map((opt) => {
+              const optId = opt.id ?? opt;
+              const optNome = opt.nome ?? opt;
+              const currentId = value?.id ?? value;
+              const isSelected = optId === currentId || optNome === currentId;
+
+              return (
+                <button
+                  key={optId}
+                  onClick={() => { onChange(opt); setOpen(false); }}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-left hover:bg-[#F4F6F9] transition-colors cursor-pointer"
+                  style={{
+                    background: isSelected ? "#F4F6F9" : "transparent",
+                    fontWeight: isSelected ? 600 : 400,
+                    color: "#1E293B",
+                  }}
+                >
+                  {isSelected ? (
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#0066CC" strokeWidth="3">
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  ) : (
+                    <span className="w-2.5" />
+                  )}
+                  {optNome}
+                </button>
+              );
+            })}
           </div>
         )}
       </div>
@@ -93,12 +99,7 @@ function EditableSelect({
   );
 }
 
-// Inline editable date field
-function EditableDate({
-  label,
-  value,
-  onChange,
-}) {
+function EditableDate({ label, value, onChange }) {
   const [editing, setEditing] = useState(false);
 
   return (
@@ -109,7 +110,10 @@ function EditableDate({
           type="datetime-local"
           defaultValue={value ? value.slice(0, 16) : ""}
           autoFocus
-          onBlur={(e) => { onChange(e.target.value ? new Date(e.target.value).toISOString() : ""); setEditing(false); }}
+          onBlur={(e) => {
+            onChange(e.target.value ? new Date(e.target.value).toISOString() : "");
+            setEditing(false);
+          }}
           onKeyDown={(e) => { if (e.key === "Escape") setEditing(false); }}
           className="text-xs border rounded px-1.5 py-0.5 outline-none"
           style={{ borderColor: "#0066CC", color: "#1E293B" }}
@@ -117,7 +121,7 @@ function EditableDate({
       ) : (
         <button
           onClick={() => setEditing(true)}
-          className="flex items-center gap-1.5 text-xs rounded px-1.5 py-0.5 transition-colors hover:bg-[#F1F5F9] border border-transparent hover:border-[#E2E8F0]"
+          className="flex items-center gap-1.5 text-xs rounded px-1.5 py-0.5 transition-colors hover:bg-[#F1F5F9] border border-transparent hover:border-[#E2E8F0] cursor-pointer"
           style={{ color: value ? "#1E293B" : "#94A3B8" }}
         >
           <span className="font-medium">{value ? formatDateTime(value) : "Definir data"}</span>
@@ -131,42 +135,173 @@ function EditableDate({
   );
 }
 
+function InfoRow({ label, value, bold }) {
+  return (
+    <div className="flex items-start justify-between gap-2">
+      <span className="text-xs flex-shrink-0" style={{ color: "#64748B" }}>{label}</span>
+      <span className={`text-xs text-right ${bold ? "font-semibold" : ""}`} style={{ color: "#1E293B" }}>
+        {value}
+      </span>
+    </div>
+  );
+}
+
 export default function TicketDetail({ ticketId, onBack }) {
-  const ticket = TICKETS.find((t) => t.id === ticketId) || TICKETS[0];
-  const [activeTab, setActiveTab] = useState("reply");
+  const [ticket, setTicket] = useState(null);
+  const [auxiliares, setAuxiliares] = useState(null);
+  const [carregando, setCarregando] = useState(true);
+
+  const [activeTab, setActiveTab] = useState("reply"); // "reply" ou "note"
   const [replyText, setReplyText] = useState("");
-  const [messages, setMessages] = useState(ticket.messages);
+  const [noteText, setNoteText] = useState("");
+  const [enviando, setEnviando] = useState(false);
+  const [anexos, setAnexos] = useState([]);
+  const fileInputRef = useRef(null);
 
-  // Editable right-panel fields
-  const [status, setStatus] = useState(ticket.status);
-  const [priority, setPriority] = useState(ticket.priority);
-  const [category, setCategory] = useState(ticket.type);
-  const [channel, setChannel] = useState(ticket.channel === "email" ? "E-mail" : "WhatsApp");
-  const [finalizadoEm, setFinalizadoEm] = useState("");
-  const [ultimaMovimentacao] = useState(ticket.updated);
+  async function carregarDetalhes() {
+    try {
+      setCarregando(true);
+      const [resTicket, resAux] = await Promise.all([
+        fetch(`${BASE_URL}/tickets/${ticketId}`),
+        fetch(`${BASE_URL}/tickets/auxiliares`),
+      ]);
 
-  function sendReply() {
-    if (!replyText.trim()) return;
-    const newMsg = {
-      id: messages.length + 1,
-      from: "regis.rinaldi@fretegestao.com.br",
-      fromName: "Régis Rinaldi",
-      type: activeTab === "reply" ? "outgoing" : "note",
-      content: replyText,
-      date: new Date().toISOString(),
-      attachments: [],
-    };
-    setMessages([...messages, newMsg]);
-    setReplyText("");
+      if (resTicket.ok) {
+        const dados = await resTicket.json();
+        setTicket(dados);
+      }
+      if (resAux.ok) {
+        const aux = await resAux.json();
+        setAuxiliares(aux);
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setCarregando(false);
+    }
   }
 
-  function handleFinalize() {
-    sendReply();
-    setStatus("Resolvido");
-    setFinalizadoEm(new Date().toISOString());
+  useEffect(() => {
+    carregarDetalhes();
+  }, [ticketId]);
+
+  async function atualizarCampo(campo, valor) {
+    if (!ticket) return;
+    try {
+      const res = await fetch(`${BASE_URL}/tickets/${ticket.id}`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ [campo]: valor }),
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.message || "Erro ao atualizar ticket");
+        return;
+      }
+
+      const atualizado = await res.json();
+      setTicket((prev) => ({
+        ...prev,
+        ...atualizado,
+        cliente: atualizado.cliente || null,
+        cliente_id: atualizado.cliente_id || null,
+        usuarios: atualizado.usuarios || [],
+      }));
+    } catch (err) {
+      console.error(err);
+      alert("Erro de comunicação ao atualizar");
+    }
   }
 
-  const statusStyle = STATUS_COLORS[status] || STATUS_COLORS["Aberto"];
+  async function alterarResponsavel(usuarioId) {
+    // Envia o array com o usuário selecionado ou array vazio se desatribuir
+    const listaUsuarios = usuarioId ? [Number(usuarioId)] : [];
+    await atualizarCampo("usuarios", listaUsuarios);
+  }
+
+  async function enviarResposta(finalizar = false) {
+    const isNota = activeTab === "note";
+    const textoMensagem = isNota ? noteText.trim() : replyText.trim();
+
+    if (!textoMensagem && anexos.length === 0) return;
+
+    try {
+      setEnviando(true);
+      const formData = new FormData();
+      formData.append("mensagem", textoMensagem);
+      formData.append("eh_interna", isNota ? "1" : "0");
+      
+      anexos.forEach((file) => {
+        formData.append("anexos[]", file);
+      });
+
+      const res = await fetch(`${BASE_URL}/tickets/${ticket.id}/responder`, {
+        method: "POST",
+        headers: { Accept: "application/json" },
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err.message || "Erro ao salvar comunicação");
+        return;
+      }
+
+      if (isNota) {
+        setNoteText("");
+      } else {
+        setReplyText("");
+      }
+      setAnexos([]);
+
+      if (finalizar) {
+        const statusResolvidoId = auxiliares?.status?.find((s) => s.nome.toLowerCase().includes("resolvido"))?.id;
+        if (statusResolvidoId) {
+          await atualizarCampo("status_id", statusResolvidoId);
+        }
+        await atualizarCampo("dataFinalizado", new Date().toISOString());
+      }
+
+      await carregarDetalhes();
+    } catch (err) {
+      console.error(err);
+      alert("Falha ao salvar comunicação");
+    } finally {
+      setEnviando(false);
+    }
+  }
+
+  if (carregando) {
+    return (
+      <div className="flex-1 flex items-center justify-center bg-[#F4F6F9] text-sm text-slate-500">
+        Carregando detalhes do ticket #{ticketId}...
+      </div>
+    );
+  }
+
+  if (!ticket) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center bg-[#F4F6F9] gap-3">
+        <p className="text-slate-700 font-medium">Ticket não localizado no banco de dados.</p>
+        <button onClick={onBack} className="text-xs font-semibold text-[#0066CC] underline cursor-pointer">
+          ← Voltar para listagem
+        </button>
+      </div>
+    );
+  }
+
+  const cliente = ticket.cliente;
+  const statusAtual = ticket.status?.nome || "Aberto";
+  const prioridadeAtual = ticket.prioridade?.nome || "Média";
+  const categoriaAtual = ticket.categoria?.nome || "Geral";
+  const canalAtual = ticket.canal?.nome || "E-mail";
+  const statusStyle = STATUS_COLORS[statusAtual] || STATUS_COLORS["Aberto"];
+  const mensagens = ticket.mensagens || [];
+  const responsavel = ticket.usuarios?.[0] || null;
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden" style={{ background: "#F4F6F9" }}>
@@ -174,10 +309,7 @@ export default function TicketDetail({ ticketId, onBack }) {
       <div className="flex items-center gap-2 px-6 py-3 border-b bg-white flex-shrink-0" style={{ borderColor: "#E2E8F0" }}>
         <button
           onClick={onBack}
-          className="flex items-center gap-1.5 text-sm transition-colors"
-          style={{ color: "#64748B" }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = "#0066CC"; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = "#64748B"; }}
+          className="flex items-center gap-1.5 text-sm transition-colors cursor-pointer text-slate-500 hover:text-[#0066CC]"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
             <path d="M15 18l-6-6 6-6" />
@@ -187,307 +319,466 @@ export default function TicketDetail({ ticketId, onBack }) {
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#CBD5E1" strokeWidth="2">
           <path d="M9 18l6-6-6-6" />
         </svg>
-        <span className="text-sm font-medium" style={{ color: "#1E293B" }}>#{ticket.id} — {ticket.subject}</span>
+        <span className="text-sm font-medium text-slate-800 truncate">
+          #{ticket.id} — {ticket.titulo}
+        </span>
         <div className="ml-auto flex items-center gap-2">
           <span
-            className="text-xs font-medium px-2.5 py-1 rounded-full"
+            className="text-xs font-semibold px-2.5 py-1 rounded-full"
             style={{ background: statusStyle.bg, color: statusStyle.color }}
           >
-            {status}
+            {statusAtual}
           </span>
         </div>
       </div>
 
       <div className="flex-1 flex overflow-hidden">
-        {/* Thread (70%) */}
+        {/* Thread de Mensagens */}
         <div className="flex-1 flex flex-col overflow-hidden">
-          {/* SLA bar */}
+          {/* Barra de SLA / Info rápida */}
           <div
             className="flex items-center gap-4 px-6 py-2.5 border-b flex-shrink-0"
             style={{ background: "#FFFBEB", borderColor: "#FDE68A" }}
           >
-            <span className="text-xs font-medium" style={{ color: "#92400E" }}>
-              ⏱️ Resolução prevista em: <strong>{ticket.slaResolution}</strong>
+            <span className="text-xs font-medium text-amber-900">
+              ⏱️ Resolução prevista: <strong>{ticket.prioridade?.prazo || "2 dias"}</strong>
             </span>
-            <div className="h-4 w-px" style={{ background: "#FDE68A" }} />
-            <span className="text-xs" style={{ color: "#92400E" }}>
-              🎯 Categoria: <strong>{category}</strong>
+            <div className="h-4 w-px bg-amber-200" />
+            <span className="text-xs text-amber-900">
+              🎯 Categoria: <strong>{categoriaAtual}</strong>
             </span>
-            <div className="h-4 w-px" style={{ background: "#FDE68A" }} />
-            <span className="text-xs" style={{ color: "#92400E" }}>
-              📢 Canal: <strong>{channel}</strong>
+            <div className="h-4 w-px bg-amber-200" />
+            <span className="text-xs text-amber-900">
+              📢 Canal: <strong>{canalAtual}</strong>
             </span>
           </div>
 
-          {/* Messages */}
+          {/* Histórico da Linha do Tempo */}
           <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
-            {messages.map((msg) => {
-              if (msg.type === "note") {
-                return (
-                  <div key={msg.id} className="rounded-xl p-4 border" style={{ background: "#FEF9C3", borderColor: "#FDE047" }}>
-                    <div className="flex items-center gap-2 mb-2">
-                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#CA8A04" strokeWidth="2">
-                        <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
-                        <path d="M7 11V7a5 5 0 0 1 10 0v4" />
-                      </svg>
-                      <span className="text-xs font-semibold" style={{ color: "#854D0E" }}>
-                        Nota Interna — Apenas colaboradores da Frete Gestão visualizam
-                      </span>
-                      <span className="ml-auto text-xs" style={{ color: "#A16207" }}>{formatDateTime(msg.date)}</span>
-                    </div>
-                    <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white mb-2" style={{ background: "#0066CC" }}>RR</div>
-                    <p className="text-sm" style={{ color: "#713F12" }}>{msg.content}</p>
-                  </div>
-                );
-              }
+            {mensagens.map((msg) => {
+              const isOutgoing = Boolean(msg.usuario_id);
+              const isNotaInterna = msg.assunto && msg.assunto.includes("[NOTA INTERNA]");
+              const remetenteFrom = msg.destinatarios?.find((d) => d.tipo === "from");
+              
+              const autorNome = isOutgoing
+                ? (msg.usuario?.nome || "Atendente")
+                : (cliente?.nomeFantasia || remetenteFrom?.nome || remetenteFrom?.email || "Remetente Externo");
+              
+              const avatarTexto = isOutgoing
+                ? autorNome.slice(0, 2).toUpperCase()
+                : (cliente?.nomeFantasia ? cliente.nomeFantasia.slice(0, 2).toUpperCase() : "EXT");
 
-              const isOutgoing = msg.type === "outgoing";
+              const dataFormatada = formatDateTime(msg.data_envio || msg.created_at);
+
               return (
                 <div key={msg.id} className={`flex ${isOutgoing ? "justify-end" : "justify-start"}`}>
                   {!isOutgoing && (
-                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold text-white mr-3 flex-shrink-0 self-start mt-1" style={{ background: "#0B2847" }}>
-                      {ticket.clientInitials}
+                    <div
+                      className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold text-white mr-3 flex-shrink-0 self-start mt-1"
+                      style={{ background: cliente ? "#0B2847" : "#475569" }}
+                    >
+                      {avatarTexto}
                     </div>
                   )}
+
                   <div className={`max-w-xl ${isOutgoing ? "ml-4" : "mr-4"}`}>
                     <div className="flex items-center gap-2 mb-1.5">
-                      <span className="text-xs font-medium" style={{ color: "#1E293B" }}>{msg.fromName}</span>
-                      <span className="text-xs" style={{ color: "#94A3B8" }}>{formatDateTime(msg.date)}</span>
+                      <span className="text-xs font-medium text-slate-800">{autorNome}</span>
+                      {isNotaInterna && (
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-amber-200 text-amber-900">
+                          🔒 NOTA INTERNA
+                        </span>
+                      )}
+                      <span className="text-[11px] text-slate-400">{dataFormatada}</span>
                     </div>
+
                     <div
                       className="rounded-xl p-4 text-sm leading-relaxed"
                       style={{
-                        background: isOutgoing ? "#EBF4FF" : "#fff",
-                        border: `1px solid ${isOutgoing ? "#BFDBFE" : "#E2E8F0"}`,
+                        background: isNotaInterna 
+                          ? "#FEFCE8" 
+                          : isOutgoing 
+                          ? "#EBF4FF" 
+                          : "#fff",
+                        border: `1px solid ${
+                          isNotaInterna 
+                            ? "#FDE68A" 
+                            : isOutgoing 
+                            ? "#BFDBFE" 
+                            : "#E2E8F0"
+                        }`,
                         color: "#1E293B",
                       }}
                     >
-                      {msg.content}
-                      {msg.attachments && msg.attachments.length > 0 && (
-                        <div className="mt-3 pt-3 border-t flex flex-wrap gap-2" style={{ borderColor: isOutgoing ? "#BFDBFE" : "#E2E8F0" }}>
-                          {msg.attachments.map((att) => (
-                            <span key={att} className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium cursor-pointer" style={{ background: "#F1F5F9", color: "#0066CC" }}>
-                              📎 {att}
+                      {msg.corpo_html ? (
+                        <div
+                          className="prose prose-sm max-w-none break-words"
+                          dangerouslySetInnerHTML={{ __html: msg.corpo_html }}
+                        />
+                      ) : (
+                        <p className="whitespace-pre-wrap">{msg.corpo_texto}</p>
+                      )}
+
+                      {!isNotaInterna && msg.destinatarios && msg.destinatarios.length > 0 && (
+                        <div className="mt-2 pt-2 border-t border-slate-200 text-[11px] text-slate-500">
+                          {msg.destinatarios.map((d) => (
+                            <span key={d.id} className="mr-2 inline-block">
+                              {d.tipo === "to" ? "Para: " : d.tipo === "cc" ? "Cc: " : "De: "}
+                              <strong>{d.nome || d.email}</strong>
                             </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {msg.anexos && msg.anexos.length > 0 && (
+                        <div
+                          className="mt-3 pt-3 border-t flex flex-wrap gap-2"
+                          style={{ borderColor: isNotaInterna ? "#FDE68A" : isOutgoing ? "#BFDBFE" : "#E2E8F0" }}
+                        >
+                          {msg.anexos.map((att) => (
+                            <a
+                              key={att.id}
+                              href={`${STORAGE_URL}/${att.caminho}`}
+                              target="_blank"
+                              rel="noreferrer"
+                              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium cursor-pointer transition-colors hover:bg-blue-100"
+                              style={{ background: "#F1F5F9", color: "#0066CC" }}
+                            >
+                              📎 {att.nomeOriginal}
+                            </a>
                           ))}
                         </div>
                       )}
                     </div>
                   </div>
+
                   {isOutgoing && (
-                    <div className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold text-white ml-3 flex-shrink-0 self-start mt-1" style={{ background: "#0066CC" }}>RR</div>
+                    <div
+                      className="w-9 h-9 rounded-full flex items-center justify-center text-xs font-bold text-white ml-3 flex-shrink-0 self-start mt-1"
+                      style={{ background: isNotaInterna ? "#D97706" : "#0066CC" }}
+                    >
+                      {avatarTexto}
+                    </div>
                   )}
                 </div>
               );
             })}
           </div>
 
-          {/* Reply area */}
+          {/* Área de Resposta e Nota Interna */}
           <div className="border-t flex-shrink-0 bg-white" style={{ borderColor: "#E2E8F0" }}>
             <div className="flex border-b" style={{ borderColor: "#E2E8F0" }}>
               <button
                 onClick={() => setActiveTab("reply")}
-                className="px-4 py-3 text-sm font-medium border-b-2 transition-colors"
-                style={{ borderColor: activeTab === "reply" ? "#0066CC" : "transparent", color: activeTab === "reply" ? "#0066CC" : "#64748B" }}
+                className="px-4 py-3 text-sm font-medium border-b-2 transition-colors cursor-pointer"
+                style={{
+                  borderColor: activeTab === "reply" ? "#0066CC" : "transparent",
+                  color: activeTab === "reply" ? "#0066CC" : "#64748B",
+                }}
               >
-                ✉️ Responder ao Cliente
+                ✉️ Responder ao Chamado
               </button>
               <button
                 onClick={() => setActiveTab("note")}
-                className="px-4 py-3 text-sm font-medium border-b-2 transition-colors"
-                style={{ borderColor: activeTab === "note" ? "#F59E0B" : "transparent", color: activeTab === "note" ? "#D97706" : "#64748B" }}
+                className="px-4 py-3 text-sm font-medium border-b-2 transition-colors cursor-pointer"
+                style={{
+                  borderColor: activeTab === "note" ? "#F59E0B" : "transparent",
+                  color: activeTab === "note" ? "#D97706" : "#64748B",
+                }}
               >
                 🔒 Nota Interna
               </button>
             </div>
 
             {activeTab === "note" && (
-              <div className="px-4 pt-2 text-xs font-medium" style={{ color: "#92400E", background: "#FFFBEB" }}>
-                ⚠️ Nota restrita — visível apenas para a equipe Frete Gestão
+              <div className="px-4 py-2 text-xs font-medium border-b" style={{ color: "#92400E", background: "#FFFBEB", borderColor: "#FDE68A" }}>
+                🔒 Esta nota é visível <strong>apenas para a equipe interna</strong>. Nenhum e-mail será disparado para o cliente.
               </div>
             )}
 
             <div className="p-4">
-              <div className="flex items-center gap-1 mb-2 pb-2 border-b" style={{ borderColor: "#F1F5F9" }}>
-                {["B", "I", "U"].map((f) => (
-                  <button key={f} className="w-7 h-7 rounded flex items-center justify-center text-xs font-semibold transition-colors hover:bg-[#F1F5F9]" style={{ color: "#64748B" }}>{f}</button>
-                ))}
-                <div className="w-px h-4 mx-1" style={{ background: "#E2E8F0" }} />
-                <button className="w-7 h-7 rounded flex items-center justify-center transition-colors hover:bg-[#F1F5F9]">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="2">
-                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                  </svg>
-                </button>
-              </div>
               <textarea
                 rows={4}
-                value={replyText}
-                onChange={(e) => setReplyText(e.target.value)}
-                placeholder={activeTab === "reply" ? "Digite sua resposta ao cliente..." : "Adicionar nota interna (não visível ao cliente)..."}
-                className="w-full text-sm resize-none outline-none rounded-lg p-3"
+                value={activeTab === "reply" ? replyText : noteText}
+                onChange={(e) => {
+                  if (activeTab === "reply") {
+                    setReplyText(e.target.value);
+                  } else {
+                    setNoteText(e.target.value);
+                  }
+                }}
+                placeholder={
+                  activeTab === "reply"
+                    ? "Digite a resposta que será enviada por e-mail para o remetente..."
+                    : "Digite uma anotação técnica/interna para a equipe de suporte..."
+                }
+                className="w-full text-sm resize-none outline-none rounded-lg p-3 transition-colors"
                 style={{
                   background: activeTab === "note" ? "#FEFCE8" : "#F8FAFC",
                   border: `1px solid ${activeTab === "note" ? "#FDE68A" : "#E2E8F0"}`,
                   color: "#1E293B",
                 }}
               />
+
+              {anexos.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {anexos.map((f, i) => (
+                    <span key={i} className="text-xs bg-slate-100 px-2 py-1 rounded text-slate-700 flex items-center gap-1">
+                      📄 {f.name}
+                      <button
+                        type="button"
+                        onClick={() => setAnexos((prev) => prev.filter((_, idx) => idx !== i))}
+                        className="text-slate-400 hover:text-red-500 font-bold ml-1 cursor-pointer"
+                      >
+                        ✕
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+
               <div className="flex items-center justify-between mt-3">
-                <button className="flex items-center gap-1.5 text-xs" style={{ color: "#64748B" }}>
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
-                  </svg>
-                  Anexar arquivo
-                </button>
+                <div>
+                  <input
+                    type="file"
+                    multiple
+                    ref={fileInputRef}
+                    onChange={(e) => setAnexos(Array.from(e.target.files))}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="flex items-center gap-1.5 text-xs text-slate-600 hover:text-[#0066CC] cursor-pointer"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+                    </svg>
+                    Anexar arquivo
+                  </button>
+                </div>
+
                 <div className="flex items-center gap-2">
-                  <button
-                    onClick={sendReply}
-                    className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all"
-                    style={{ background: "#0066CC" }}
-                    onMouseEnter={(e) => { e.currentTarget.style.background = "#0054a8"; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.background = "#0066CC"; }}
-                  >
-                    {activeTab === "reply" ? "Enviar Resposta" : "Adicionar Nota"}
-                  </button>
-                  <button
-                    onClick={handleFinalize}
-                    className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
-                    style={{ background: "#10B981" }}
-                  >
-                    Enviar e Finalizar
-                  </button>
+                  {activeTab === "reply" ? (
+                    <>
+                      <button
+                        onClick={() => enviarResposta(false)}
+                        disabled={enviando || !replyText.trim()}
+                        className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all cursor-pointer disabled:opacity-50"
+                        style={{ background: "#0066CC" }}
+                      >
+                        {enviando ? "Enviando..." : "Enviar Resposta"}
+                      </button>
+                      <button
+                        onClick={() => enviarResposta(true)}
+                        disabled={enviando || !replyText.trim()}
+                        className="px-4 py-2 rounded-lg text-sm font-semibold text-white cursor-pointer disabled:opacity-50"
+                        style={{ background: "#10B981" }}
+                      >
+                        Enviar e Finalizar
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      onClick={() => enviarResposta(false)}
+                      disabled={enviando || !noteText.trim()}
+                      className="px-4 py-2 rounded-lg text-sm font-semibold text-white transition-all cursor-pointer disabled:opacity-50"
+                      style={{ background: "#D97706" }}
+                    >
+                      {enviando ? "Salvando..." : "Salvar Nota Interna"}
+                    </button>
+                  )}
                 </div>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Context panel (30%) */}
-        <div className="w-72 flex-shrink-0 border-l overflow-y-auto" style={{ background: "#fff", borderColor: "#E2E8F0" }}>
-          {/* Ticket data */}
+        {/* Painel Lateral Direito */}
+        <div className="w-72 flex-shrink-0 border-l overflow-y-auto bg-white" style={{ borderColor: "#E2E8F0" }}>
           <div className="p-4 border-b" style={{ borderColor: "#E2E8F0" }}>
-            <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: "#64748B" }}>
+            <h3 className="text-xs font-bold uppercase tracking-wider mb-3 text-slate-500">
               Dados do Chamado
             </h3>
 
-            <div className="space-y-2">
-              {/* ID — read only */}
-              <InfoRow label="ID" value={`#${ticket.id}`} />
+            <div className="space-y-3">
+              <InfoRow label="ID" value={`#${ticket.id}`} bold />
 
-              {/* Status — editable */}
+              {/* Status */}
               <EditableSelect
                 label="Status"
-                value={status}
-                options={configStore.statusOptions}
-                onChange={setStatus}
+                value={ticket.status}
+                options={auxiliares?.status || []}
+                onChange={(opt) => atualizarCampo("status_id", opt.id)}
                 renderValue={(v) => (
                   <span
-                    className="text-xs font-medium px-2 py-0.5 rounded-full"
-                    style={STATUS_COLORS[v] || { background: "#F1F5F9", color: "#64748B" }}
+                    className="text-xs font-semibold px-2 py-0.5 rounded-full"
+                    style={STATUS_COLORS[v?.nome || v] || { background: "#F1F5F9", color: "#64748B" }}
                   >
-                    {v}
+                    {v?.nome || v}
                   </span>
                 )}
               />
 
-              {/* Priority — editable */}
+              {/* Prioridade */}
               <EditableSelect
                 label="Prioridade"
-                value={priority}
-                options={configStore.priorityOptions}
-                onChange={setPriority}
-                renderValue={(v) => (
-                  <span className="flex items-center gap-1.5 text-xs font-medium" style={{ color: PRIORITY_COLORS[v] || "#64748B" }}>
-                    <span className="w-2 h-2 rounded-full" style={{ background: PRIORITY_COLORS[v] || "#64748B" }} />
-                    {v}
-                  </span>
-                )}
+                value={ticket.prioridade}
+                options={auxiliares?.prioridades || []}
+                onChange={(opt) => atualizarCampo("prioridade_id", opt.id)}
+                renderValue={(v) => {
+                  const nome = v?.nome || v;
+                  return (
+                    <span className="flex items-center gap-1.5 text-xs font-medium" style={{ color: PRIORITY_COLORS[nome] || "#64748B" }}>
+                      <span className="w-2 h-2 rounded-full" style={{ background: PRIORITY_COLORS[nome] || "#64748B" }} />
+                      {nome}
+                    </span>
+                  );
+                }}
               />
 
-              {/* Category — editable */}
+              {/* Categoria */}
               <EditableSelect
                 label="Categoria"
-                value={category}
-                options={configStore.categoryOptions}
-                onChange={setCategory}
+                value={ticket.categoria}
+                options={auxiliares?.categorias || []}
+                onChange={(opt) => atualizarCampo("categoria_id", opt.id)}
               />
 
-              {/* Channel — editable */}
+              {/* Canal */}
               <EditableSelect
                 label="Canal"
-                value={channel}
-                options={configStore.channelOptions}
-                onChange={setChannel}
-                renderValue={(v) => (
-                  <span className="text-xs font-medium">
-                    {v === "E-mail" ? "✉️ " : v === "WhatsApp" ? "💬 " : "📞 "}
-                    {v}
-                  </span>
-                )}
+                value={ticket.canal}
+                options={auxiliares?.canais || []}
+                onChange={(opt) => atualizarCampo("canal_id", opt.id)}
+                renderValue={(v) => {
+                  const nome = v?.nome || v;
+                  return (
+                    <span className="text-xs font-medium text-slate-800">
+                      {nome.toLowerCase().includes("email") ? "✉️ " : "💬 "}
+                      {nome}
+                    </span>
+                  );
+                }}
               />
 
-              {/* Dates */}
-              <div className="pt-1 border-t space-y-2" style={{ borderColor: "#F1F5F9" }}>
-                <InfoRow label="Criado em" value={formatDate(ticket.created)} />
-                <InfoRow label="Última Movimentação" value={formatDate(ultimaMovimentacao)} />
+              <div className="pt-2 border-t space-y-2 border-slate-100">
+                <InfoRow label="Criado em" value={formatDate(ticket.dataCriacao || ticket.created_at)} />
+                <InfoRow label="Última Atualização" value={formatDate(ticket.updated_at)} />
 
-                {/* Finalizado em — editable */}
                 <EditableDate
                   label="Finalizado em"
-                  value={finalizadoEm}
-                  onChange={(v) => {
-                    setFinalizadoEm(v);
-                    if (v) setStatus("Resolvido");
-                  }}
+                  value={ticket.dataFinalizado}
+                  onChange={(v) => atualizarCampo("dataFinalizado", v)}
                 />
               </div>
             </div>
 
-            <div className="mt-3 pt-3 border-t" style={{ borderColor: "#E2E8F0" }}>
-              <div className="text-[11px] font-semibold uppercase tracking-wider mb-2" style={{ color: "#64748B" }}>Participantes</div>
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white" style={{ background: "#0066CC" }}>RR</div>
-                <div>
-                  <div className="text-xs font-medium" style={{ color: "#1E293B" }}>Régis Rinaldi</div>
-                  <div className="text-[10px]" style={{ color: "#64748B" }}>Analista responsável</div>
-                </div>
+            {/* Responsável Selecionável */}
+            <div className="mt-4 pt-3 border-t border-slate-200">
+              <div className="text-[11px] font-bold uppercase tracking-wider mb-2 text-slate-500">
+                Responsável
               </div>
+
+              <div className="mb-2">
+                <select
+                  value={responsavel?.id || ""}
+                  onChange={(e) => alterarResponsavel(e.target.value)}
+                  className="w-full text-xs border rounded-lg px-2.5 py-2 outline-none font-medium transition-colors cursor-pointer"
+                  style={{
+                    borderColor: !responsavel ? "#CBD5E1" : "#93C5FD",
+                    background: !responsavel ? "#F8FAFC" : "#EFF6FF",
+                    color: !responsavel ? "#64748B" : "#1E40AF",
+                  }}
+                >
+                  <option value="">👤 Não atribuído (Fila Geral)</option>
+                  {(auxiliares?.usuarios || []).map((u) => (
+                    <option key={u.id} value={u.id}>
+                      👤 {u.nome} {u.setor ? `(${u.setor})` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {responsavel ? (
+                <div className="flex items-center gap-2 p-2 rounded-lg bg-slate-50 border border-slate-100">
+                  <div
+                    className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold text-white flex-shrink-0"
+                    style={{ background: "#0066CC" }}
+                  >
+                    {(responsavel.nome || "NA").slice(0, 2).toUpperCase()}
+                  </div>
+                  <div className="overflow-hidden">
+                    <div className="text-xs font-semibold text-slate-800 truncate">
+                      {responsavel.nome}
+                    </div>
+                    <div className="text-[10px] text-slate-400">
+                      {responsavel.setor || "Suporte"}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-[11px] text-slate-400 italic">
+                  Nenhum analista alocado a este chamado.
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Client data */}
-          <div className="p-4">
-            <h3 className="text-xs font-semibold uppercase tracking-wider mb-3" style={{ color: "#64748B" }}>Dados do Cliente</h3>
-            <div className="space-y-2.5">
-              <InfoRow label="Empresa" value={ticket.client} bold />
-              <InfoRow label="Solicitante" value={ticket.requester} />
-              <InfoRow label="CNPJ" value="89.327.642/0001-08" />
-              <InfoRow label="Plano" value={
-                <span className="text-xs font-medium px-2 py-0.5 rounded-full" style={{ background: "#EBF4FF", color: "#0066CC" }}>
-                  Enterprise
-                </span>
-              } />
-              <InfoRow label="Transportadoras" value="Sequóia, TNT, Jadlog" />
+          {/* Dados do Cliente com Seleção Editável */}
+          <div className="p-4 border-t" style={{ borderColor: "#E2E8F0" }}>
+            <h3 className="text-xs font-bold uppercase tracking-wider mb-2 text-slate-500">
+              Cliente Vinculado
+            </h3>
+
+            {/* Dropdown de Seleção de Cliente */}
+            <div className="mb-3">
+              <select
+                value={ticket.cliente_id || ""}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  const novoClienteId = val !== "" ? Number(val) : null;
+                  atualizarCampo("cliente_id", novoClienteId);
+                }}
+                className="w-full text-xs border rounded-lg px-2.5 py-2 outline-none font-medium transition-colors cursor-pointer"
+                style={{
+                  borderColor: !ticket.cliente_id ? "#F59E0B" : "#CBD5E1",
+                  background: !ticket.cliente_id ? "#FFFBEB" : "#fff",
+                  color: !ticket.cliente_id ? "#B45309" : "#1E293B",
+                }}
+              >
+                <option value="">⚠️ Sem cliente vinculado (Pendente)</option>
+                {(auxiliares?.clientes || []).map((c) => (
+                  <option key={c.id} value={c.id}>
+                    🏢 {c.nomeFantasia || c.razaoSocial}
+                  </option>
+                ))}
+              </select>
             </div>
-            <button
-              className="mt-4 w-full py-2 rounded-lg text-xs font-medium border transition-colors hover:bg-[#EBF4FF]"
-              style={{ borderColor: "#0066CC", color: "#0066CC" }}
-            >
-              Ver ficha completa do cliente →
-            </button>
+
+            {ticket.cliente ? (
+              <div className="space-y-2.5 pt-2 border-t border-slate-100">
+                <InfoRow label="Empresa" value={ticket.cliente.nomeFantasia || "—"} bold />
+                <InfoRow label="E-mail Adm" value={ticket.cliente.emailAdm || "—"} />
+                <InfoRow label="Domínio" value={ticket.cliente.dominio || "—"} />
+                <InfoRow
+                  label="Plano"
+                  value={
+                    <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">
+                      {ticket.cliente.plano?.nome || "Padrão"}
+                    </span>
+                  }
+                />
+              </div>
+            ) : (
+              <div className="p-3 rounded-lg border text-xs" style={{ background: "#FEFCE8", borderColor: "#FDE68A", color: "#854D0E" }}>
+                <p className="font-semibold mb-1">Chamado sem cadastro</p>
+                Este chamado foi aberto por um e-mail externo ainda não cadastrado. Você pode vinculá-lo selecionando uma empresa acima assim que cadastrar o cliente.
+              </div>
+            )}
           </div>
         </div>
       </div>
-    </div>
-  );
-}
-
-function InfoRow({ label, value, bold }) {
-  return (
-    <div className="flex items-start justify-between gap-2">
-      <span className="text-xs flex-shrink-0" style={{ color: "#64748B" }}>{label}</span>
-      <span className={`text-xs text-right ${bold ? "font-semibold" : ""}`} style={{ color: "#1E293B" }}>
-        {value}
-      </span>
     </div>
   );
 }

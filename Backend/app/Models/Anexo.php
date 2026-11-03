@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class Anexo extends Model
@@ -9,6 +10,8 @@ class Anexo extends Model
     use HasFactory;
 
     protected $table = 'anexo';
+
+    public $timestamps = false;
 
     protected $fillable = [
         'nome',

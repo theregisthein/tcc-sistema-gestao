@@ -51,6 +51,14 @@ const DEFAULT_CHECKLIST_TEMPLATE = {
   ],
 };
 
+function formatBytes(bytes) {
+  if (!bytes || bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+}
+
 function formatMoneyBRL(value) {
   if (value === null || value === undefined || value === "") return "R$ 0,00";
   if (typeof value === "number") {
@@ -91,6 +99,11 @@ export default function NovaImplantacao({ onBack, onCreated }) {
   const [responsaveis, setResponsaveis] = useState([]);
   const [priority, setPriority] = useState("Alta");
   const [status, setStatus] = useState("Coleta de Dados");
+
+  // Anexos
+  const [anexosLocais, setAnexosLocais] = useState([]);
+  const [vincularTambemCliente, setVincularTambemCliente] = useState(false);
+  const fileInputRef = useRef(null);
 
   // Datas 100% editáveis
   const todayStr = new Date().toISOString().slice(0, 10);
@@ -208,6 +221,18 @@ export default function NovaImplantacao({ onBack, onCreated }) {
     setResponsaveis((prev) => prev.filter((u) => u.id !== id));
   }
 
+  // Manipulação de Arquivos
+  function handleSelecionarArquivo(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setAnexosLocais((prev) => [...prev, file]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function handleRemoverAnexoLocal(idx) {
+    setAnexosLocais((prev) => prev.filter((_, i) => i !== idx));
+  }
+
   // Manipulação de Checklists e Itens
   function handleToggleTask(phaseName, taskId) {
     setChecklist((prev) => ({
@@ -317,7 +342,27 @@ export default function NovaImplantacao({ onBack, onCreated }) {
       }
 
       const novaImp = await res.json();
-      setCreatedId(`IMP-${String(novaImp.id).padStart(4, "0")}`);
+      const novoId = novaImp.id;
+
+      // Realiza o upload de cada arquivo da fila para a nova implantação
+      if (anexosLocais.length > 0) {
+        for (const file of anexosLocais) {
+          const fd = new FormData();
+          fd.append("arquivo", file);
+          fd.append("implantacao_id", novoId);
+          if (vincularTambemCliente && selectedClientId) {
+            fd.append("cliente_id", selectedClientId);
+          }
+
+          await fetch(`${BASE_URL}/anexos`, {
+            method: "POST",
+            headers: { Accept: "application/json" },
+            body: fd,
+          });
+        }
+      }
+
+      setCreatedId(`IMP-${String(novoId).padStart(4, "0")}`);
       setShowSuccessModal(true);
     } catch (err) {
       alert("Erro ao conectar com o servidor.");
@@ -534,11 +579,93 @@ export default function NovaImplantacao({ onBack, onCreated }) {
           </div>
         </div>
 
+        {/* 📎 Seção de Anexos da Nova Implantação */}
+        <div className="bg-white rounded-xl border p-6 shadow-2xs space-y-4" style={{ borderColor: "#E2E8F0" }}>
+          <div className="flex items-center justify-between pb-3 border-b flex-wrap gap-3" style={{ borderColor: "#E2E8F0" }}>
+            <div>
+              <h2 className="text-sm font-bold text-[#1E293B]">3. Documentos & Anexos Iniciais</h2>
+              <p className="text-xs text-[#64748B] mt-0.5">
+                Tabelas de frete, cronogramas, layouts de importação ou arquivos de parametrização
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              {selectedClientId && (
+                <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={vincularTambemCliente}
+                    onChange={(e) => setVincularTambemCliente(e.target.checked)}
+                    className="rounded accent-[#0066CC]"
+                  />
+                  Vincular também à ficha geral do cliente
+                </label>
+              )}
+
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleSelecionarArquivo}
+                className="hidden"
+              />
+
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white cursor-pointer shadow-xs flex items-center gap-1.5"
+                style={{ background: "#0066CC" }}
+              >
+                <span>📎</span>
+                <span>+ Adicionar Arquivo</span>
+              </button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            {anexosLocais.map((file, idx) => (
+              <div
+                key={idx}
+                className="flex items-center justify-between p-3 rounded-xl border bg-blue-50/40 border-blue-200"
+              >
+                <div className="flex items-center gap-3 min-w-0 pr-3">
+                  <span className="text-xl flex-shrink-0">📄</span>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-[#1E293B] truncate">{file.name}</div>
+                    <div className="text-[11px] text-slate-500">
+                      {formatBytes(file.size)} • Pronto para upload ao salvar
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => handleRemoverAnexoLocal(idx)}
+                  className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
+                  title="Remover arquivo da lista"
+                >
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <polyline points="3 6 5 6 21 6" />
+                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                  </svg>
+                </button>
+              </div>
+            ))}
+
+            {anexosLocais.length === 0 && (
+              <div className="p-6 rounded-xl border border-dashed text-center bg-[#F8FAFC]" style={{ borderColor: "#CBD5E1" }}>
+                <p className="text-xs text-[#94A3B8]">
+                  Nenhum arquivo anexado. Você pode carregar tabelas de frete ou especificações técnicas agora.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* Checklist Dinâmico: Adicionar Fases e Itens */}
         <div className="bg-white rounded-xl border p-6 shadow-2xs" style={{ borderColor: "#E2E8F0" }}>
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h2 className="text-sm font-bold text-[#1E293B]">3. Checklist Operacional</h2>
+              <h2 className="text-sm font-bold text-[#1E293B]">4. Checklist Operacional</h2>
               <p className="text-xs text-[#64748B]">Adicione novas fases ou tarefas personalizadas.</p>
             </div>
 
@@ -551,7 +678,7 @@ export default function NovaImplantacao({ onBack, onCreated }) {
             </button>
           </div>
 
-          {/* Modal / Bloco de Adicionar Nova Fase */}
+          {/* Bloco de Adicionar Nova Fase */}
           {addingPhase && (
             <div className="mb-4 p-4 border rounded-xl bg-slate-50 flex items-center gap-2" style={{ borderColor: "#E2E8F0" }}>
               <input
@@ -669,7 +796,7 @@ export default function NovaImplantacao({ onBack, onCreated }) {
 
         {/* Observações */}
         <div className="bg-white rounded-xl border p-6 shadow-2xs" style={{ borderColor: "#E2E8F0" }}>
-          <h2 className="text-sm font-bold text-[#1E293B] mb-2">4. Observações Iniciais</h2>
+          <h2 className="text-sm font-bold text-[#1E293B] mb-2">5. Observações Iniciais</h2>
           <textarea
             rows={4}
             value={notes}
@@ -710,7 +837,7 @@ export default function NovaImplantacao({ onBack, onCreated }) {
             <h3 className="text-lg font-bold text-[#1E293B]">Implantação Criada com Sucesso!</h3>
             <p className="text-xs text-[#64748B] mt-2">
               O projeto <strong className="text-[#0066CC]">{createdId}</strong> para o cliente{" "}
-              <strong>{clientName}</strong> foi registrado na base de dados com seus responsáveis e checklists associados.
+              <strong>{clientName}</strong> foi registrado na base de dados com seus responsáveis, checklists e anexos associados.
             </p>
             <div className="mt-6 flex gap-2">
               <button

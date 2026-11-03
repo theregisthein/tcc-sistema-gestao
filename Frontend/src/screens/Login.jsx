@@ -1,5 +1,7 @@
 import { useState } from "react";
 
+const BASE_URL = "http://localhost:8000/api";
+
 function LeftBanner() {
   return (
     <div
@@ -59,17 +61,45 @@ function LeftBanner() {
   );
 }
 
-// ── Login form ──────────────────────────────────────────────────────────────
 function LoginForm({ onLogin, onForgot }) {
-  const [email, setEmail] = useState("regis.rinaldi@fretegestao.com.br");
-  const [password, setPassword] = useState("••••••••");
+  const [email, setEmail] = useState("regis@fretegestao.com");
+  const [password, setPassword] = useState("12345678");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [erro, setErro] = useState("");
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
+    setErro("");
     setLoading(true);
-    setTimeout(() => { setLoading(false); onLogin(); }, 1000);
+
+    try {
+      const res = await fetch(`${BASE_URL}/login`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "Accept": "application/json",
+        },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.message || "Credenciais inválidas.");
+      }
+
+      localStorage.setItem("user", JSON.stringify(data.user));
+      if (data.token) {
+        localStorage.setItem("token", data.token);
+      }
+
+      onLogin(data.user);
+    } catch (err) {
+      setErro(err.message);
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -82,28 +112,47 @@ function LoginForm({ onLogin, onForgot }) {
         <h2 className="text-2xl font-bold mb-1.5" style={{ color: "#1E293B" }}>Acesse sua conta</h2>
         <p className="text-sm" style={{ color: "#64748B" }}>Entre com suas credenciais corporativas</p>
       </div>
+
+      {erro && (
+        <div className="mb-4 p-3 rounded-lg text-xs font-medium bg-red-50 border border-red-200 text-red-700">
+          ⚠️ {erro}
+        </div>
+      )}
+
       <form onSubmit={handleSubmit} className="space-y-4">
         <div>
           <label className="block text-sm font-medium mb-1.5" style={{ color: "#1E293B" }}>E-mail corporativo</label>
           <input
-            type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            required
             className="w-full px-3.5 py-2.5 text-sm rounded-lg outline-none transition-all"
             style={{ border: "1.5px solid #E2E8F0", color: "#1E293B", background: "#fff" }}
             onFocus={(e) => { e.target.style.borderColor = "#0066CC"; e.target.style.boxShadow = "0 0 0 3px rgba(0,102,204,0.12)"; }}
             onBlur={(e) => { e.target.style.borderColor = "#E2E8F0"; e.target.style.boxShadow = "none"; }}
           />
         </div>
+
         <div>
           <label className="block text-sm font-medium mb-1.5" style={{ color: "#1E293B" }}>Senha</label>
           <div className="relative">
             <input
-              type={showPassword ? "text" : "password"} value={password} onChange={(e) => setPassword(e.target.value)}
+              type={showPassword ? "text" : "password"}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
               className="w-full px-3.5 py-2.5 pr-10 text-sm rounded-lg outline-none transition-all"
               style={{ border: "1.5px solid #E2E8F0", color: "#1E293B", background: "#fff" }}
               onFocus={(e) => { e.target.style.borderColor = "#0066CC"; e.target.style.boxShadow = "0 0 0 3px rgba(0,102,204,0.12)"; }}
               onBlur={(e) => { e.target.style.borderColor = "#E2E8F0"; e.target.style.boxShadow = "none"; }}
             />
-            <button type="button" onClick={() => setShowPassword(!showPassword)} className="absolute right-3 top-1/2 -translate-y-1/2" style={{ color: "#64748B" }}>
+            <button
+              type="button"
+              onClick={() => setShowPassword(!showPassword)}
+              className="absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer"
+              style={{ color: "#64748B" }}
+            >
               {showPassword ? (
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" />
@@ -111,60 +160,92 @@ function LoginForm({ onLogin, onForgot }) {
                 </svg>
               ) : (
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
+                  <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8z" /><circle cx="12" cy="12" r="3" />
                 </svg>
               )}
             </button>
           </div>
           <div className="flex justify-end mt-1.5">
-            <button type="button" onClick={onForgot} className="text-xs font-medium" style={{ color: "#0066CC" }}>
+            <button type="button" onClick={onForgot} className="text-xs font-medium cursor-pointer" style={{ color: "#0066CC" }}>
               Esqueceu a senha?
             </button>
           </div>
         </div>
+
         <button
-          type="submit" disabled={loading}
-          className="w-full py-2.5 rounded-lg text-sm font-semibold text-white transition-all mt-2"
+          type="submit"
+          disabled={loading}
+          className="w-full py-2.5 rounded-lg text-sm font-semibold text-white transition-all mt-2 cursor-pointer"
           style={{ background: loading ? "#0F5FC2" : "#0066CC", opacity: loading ? 0.8 : 1 }}
-          onMouseEnter={(e) => { if (!loading) e.target.style.background = "#0054a8"; }}
-          onMouseLeave={(e) => { if (!loading) e.target.style.background = "#0066CC"; }}
         >
-          {loading ? (
-            <span className="flex items-center justify-center gap-2">
-              <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="white" strokeWidth="4" />
-                <path className="opacity-75" fill="white" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-              </svg>
-              Entrando...
-            </span>
-          ) : "Entrar no Sistema"}
+          {loading ? "Entrando..." : "Entrar no Sistema"}
         </button>
       </form>
     </div>
   );
 }
 
-// ── Forgot password form ────────────────────────────────────────────────────
 function ForgotPasswordForm({ onBack }) {
+  const [step, setStep] = useState("request");
   const [email, setEmail] = useState("");
-  const [sent, setSent] = useState(false);
+  const [token, setToken] = useState("");
+  const [novaSenha, setNovaSenha] = useState("");
   const [loading, setLoading] = useState(false);
+  const [erro, setErro] = useState("");
 
-  function handleSubmit(e) {
+  async function handleRequestToken(e) {
     e.preventDefault();
     if (!email.trim()) return;
+    setErro("");
     setLoading(true);
-    setTimeout(() => { setLoading(false); setSent(true); }, 1200);
+
+    try {
+      const res = await fetch(`${BASE_URL}/forgot-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ email }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Erro ao solicitar recuperação.");
+
+      if (data.reset_token) setToken(data.reset_token);
+      setStep("reset");
+    } catch (err) {
+      setErro(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleResetPassword(e) {
+    e.preventDefault();
+    setErro("");
+    setLoading(true);
+
+    try {
+      const res = await fetch(`${BASE_URL}/reset-password`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Accept: "application/json" },
+        body: JSON.stringify({ email, token, password: novaSenha }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || "Erro ao atualizar senha.");
+
+      setStep("success");
+    } catch (err) {
+      setErro(err.message);
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
     <div className="w-full max-w-sm">
       <button
         onClick={onBack}
-        className="flex items-center gap-2 text-sm mb-8 transition-colors"
-        style={{ color: "#64748B" }}
-        onMouseEnter={(e) => { e.currentTarget.style.color = "#0066CC"; }}
-        onMouseLeave={(e) => { e.currentTarget.style.color = "#64748B"; }}
+        className="flex items-center gap-2 text-sm mb-8 transition-colors cursor-pointer text-slate-500 hover:text-[#0066CC]"
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
           <path d="M15 18l-6-6 6-6" />
@@ -172,105 +253,101 @@ function ForgotPasswordForm({ onBack }) {
         Voltar para o login
       </button>
 
-      {sent ? (
-        /* Success state */
+      {erro && (
+        <div className="mb-4 p-3 rounded-lg text-xs font-medium bg-red-50 border border-red-200 text-red-700">
+          ⚠️ {erro}
+        </div>
+      )}
+
+      {step === "success" && (
         <div className="text-center">
-          <div
-            className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4"
-            style={{ background: "#ECFDF5" }}
-          >
+          <div className="w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 bg-emerald-50">
             <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#10B981" strokeWidth="2">
               <polyline points="20 6 9 17 4 12" />
             </svg>
           </div>
-          <h2 className="text-2xl font-bold mb-2" style={{ color: "#1E293B" }}>E-mail enviado!</h2>
-          <p className="text-sm leading-relaxed mb-6" style={{ color: "#64748B" }}>
-            Enviamos um link de redefinição de senha para{" "}
-            <strong style={{ color: "#1E293B" }}>{email}</strong>.
-            <br /><br />
-            Verifique sua caixa de entrada e a pasta de spam. O link expira em <strong>30 minutos</strong>.
+          <h2 className="text-2xl font-bold mb-2 text-[#1E293B]">Senha Atualizada!</h2>
+          <p className="text-sm leading-relaxed mb-6 text-slate-500">
+            A sua palavra-passe foi alterada com sucesso.
           </p>
           <button
             onClick={onBack}
-            className="w-full py-2.5 rounded-lg text-sm font-semibold text-white"
-            style={{ background: "#0066CC" }}
+            className="w-full py-2.5 rounded-lg text-sm font-semibold text-white bg-[#0066CC] cursor-pointer"
           >
-            Voltar para o login
+            Acessar com a nova senha
           </button>
         </div>
-      ) : (
+      )}
+
+      {step === "request" && (
         <>
           <div className="mb-8">
-            <div
-              className="w-12 h-12 rounded-xl flex items-center justify-center mb-4"
-              style={{ background: "#EBF4FF" }}
-            >
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0066CC" strokeWidth="2">
-                <rect width="20" height="16" x="2" y="4" rx="2" />
-                <path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
-              </svg>
-            </div>
-            <h2 className="text-2xl font-bold mb-2" style={{ color: "#1E293B" }}>Esqueceu a senha?</h2>
-            <p className="text-sm leading-relaxed" style={{ color: "#64748B" }}>
-              Sem problemas. Informe o e-mail corporativo cadastrado na sua conta e enviaremos um link para redefinir sua senha.
+            <h2 className="text-2xl font-bold mb-2 text-[#1E293B]">Esqueceu a senha?</h2>
+            <p className="text-sm leading-relaxed text-slate-500">
+              Informe o e-mail corporativo cadastrado para redefinir o acesso.
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          <form onSubmit={handleRequestToken} className="space-y-4">
             <div>
-              <label className="block text-sm font-medium mb-1.5" style={{ color: "#1E293B" }}>
-                E-mail corporativo
-              </label>
+              <label className="block text-sm font-medium mb-1.5 text-[#1E293B]">E-mail corporativo</label>
               <input
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                placeholder="seu@fretegestao.com.br"
+                placeholder="regis@fretegestao.com"
                 required
-                className="w-full px-3.5 py-2.5 text-sm rounded-lg outline-none transition-all"
-                style={{ border: "1.5px solid #E2E8F0", color: "#1E293B", background: "#fff" }}
-                onFocus={(e) => { e.target.style.borderColor = "#0066CC"; e.target.style.boxShadow = "0 0 0 3px rgba(0,102,204,0.12)"; }}
-                onBlur={(e) => { e.target.style.borderColor = "#E2E8F0"; e.target.style.boxShadow = "none"; }}
+                className="w-full px-3.5 py-2.5 text-sm rounded-lg outline-none border border-slate-200 bg-white"
               />
-              <p className="text-xs mt-1.5" style={{ color: "#94A3B8" }}>
-                Um link de redefinição de senha será enviado para este e-mail.
-              </p>
             </div>
 
             <button
               type="submit"
               disabled={loading || !email.trim()}
-              className="w-full py-2.5 rounded-lg text-sm font-semibold text-white transition-all"
-              style={{
-                background: loading || !email.trim() ? "#94A3B8" : "#0066CC",
-                cursor: loading || !email.trim() ? "not-allowed" : "pointer",
-              }}
+              className="w-full py-2.5 rounded-lg text-sm font-semibold text-white bg-[#0066CC] disabled:opacity-50 cursor-pointer"
             >
-              {loading ? (
-                <span className="flex items-center justify-center gap-2">
-                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="white" strokeWidth="4" />
-                    <path className="opacity-75" fill="white" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
-                  </svg>
-                  Enviando...
-                </span>
-              ) : "Enviar link de redefinição"}
+              {loading ? "Verificando..." : "Prosseguir"}
             </button>
           </form>
+        </>
+      )}
 
-          <div
-            className="mt-4 p-3 rounded-xl text-xs"
-            style={{ background: "#FFFBEB", border: "1px solid #FDE68A", color: "#92400E" }}
-          >
-            ⚠️ O link expira em <strong>30 minutos</strong>. Caso não receba o e-mail, verifique a pasta de spam ou entre em contato com o administrador do sistema.
+      {step === "reset" && (
+        <>
+          <div className="mb-8">
+            <h2 className="text-2xl font-bold mb-2 text-[#1E293B]">Definir Nova Senha</h2>
+            <p className="text-sm leading-relaxed text-slate-500">
+              Conta verificada para <strong>{email}</strong>. Digite a sua nova senha abaixo.
+            </p>
           </div>
+
+          <form onSubmit={handleResetPassword} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium mb-1.5 text-[#1E293B]">Nova Senha</label>
+              <input
+                type="password"
+                value={novaSenha}
+                onChange={(e) => setNovaSenha(e.target.value)}
+                placeholder="Mínimo 6 caracteres"
+                required
+                className="w-full px-3.5 py-2.5 text-sm rounded-lg outline-none border border-slate-200 bg-white"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading || novaSenha.length < 6}
+              className="w-full py-2.5 rounded-lg text-sm font-semibold text-white bg-[#0066CC] disabled:opacity-50 cursor-pointer"
+            >
+              {loading ? "Gravando..." : "Salvar Nova Senha"}
+            </button>
+          </form>
         </>
       )}
     </div>
   );
 }
 
-// ── Main export ─────────────────────────────────────────────────────────────
 export default function Login({ onLogin }) {
   const [view, setView] = useState("login");
 

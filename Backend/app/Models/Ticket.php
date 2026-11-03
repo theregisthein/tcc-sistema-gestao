@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class Ticket extends Model
@@ -24,6 +25,13 @@ class Ticket extends Model
         'titulo',
         'message_id_header',
         'tempo',
+    ];
+
+    protected $casts = [
+        'dataCriacao'    => 'datetime',
+        'prazoPrimResp'  => 'datetime',
+        'prazoResolucao' => 'datetime',
+        'dataFinalizado' => 'datetime',
     ];
 
     // Relacionamento com Cliente
@@ -53,13 +61,13 @@ class Ticket extends Model
         return $this->belongsTo(PrioridadeConfig::class, 'prioridade_id');
     }
 
-    // Relacionamento N:N com Usuários atribuídos (UsuarioTicket)
+    // Relacionamento N:N com Usuários atribuídos (tabela real: usuario_ticket)
     public function usuarios()
     {
-        return $this->belongsToMany(Usuario::class, 'UsuarioTicket', 'ticket_id', 'usuario_id');
+        return $this->belongsToMany(Usuario::class, 'usuario_ticket', 'ticket_id', 'usuario_id');
     }
 
-    // Mensagens do Ticket (que faremos a seguir)
+    // Mensagens / Linha do tempo do Ticket
     public function mensagens()
     {
         return $this->hasMany(MensagemTicket::class, 'ticket_id');

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 const BASE_URL = "http://localhost:8000/api";
 
@@ -11,6 +11,14 @@ const STATUS_COLORS = {
 };
 
 const PHASE_COLORS = ["#0066CC", "#F26522", "#D97706", "#10B981", "#7C3AED", "#E11D48"];
+
+function formatBytes(bytes) {
+  if (!bytes || bytes === 0) return "0 B";
+  const k = 1024;
+  const sizes = ["B", "KB", "MB", "GB"];
+  const i = Math.floor(Math.log(bytes) / Math.log(k));
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+}
 
 // Converte AAAA-MM-DD para DD/MM/AAAA
 function isoParaBr(isoStr) {
@@ -41,6 +49,196 @@ function extrairMetadado(observacao, chave, padrao = "") {
   if (!observacao) return padrao;
   const match = observacao.match(new RegExp(`${chave}:\\s*([^|\\n]+)`));
   return match ? match[1].trim() : padrao;
+}
+
+// 📎 Componente de Gestão de Anexos da Implantação
+function AnexosImplantacaoSection({ implantacaoId, clienteId }) {
+  const [anexos, setAnexos] = useState([]);
+  const [carregando, setCarregando] = useState(false);
+  const [enviando, setEnviando] = useState(false);
+  const [vincularTambemCliente, setVincularTambemCliente] = useState(false);
+  const fileInputRef = useRef(null);
+
+  const carregarAnexos = async () => {
+    if (!implantacaoId) return;
+    setCarregando(true);
+    try {
+      const res = await fetch(`${BASE_URL}/anexos?implantacao_id=${implantacaoId}`);
+      if (res.ok) {
+        const dados = await res.json();
+        setAnexos(dados);
+      }
+    } catch (err) {
+      console.error("Erro ao listar anexos da implantação:", err);
+    } finally {
+      setCarregando(false);
+    }
+  };
+
+  useEffect(() => {
+    carregarAnexos();
+  }, [implantacaoId]);
+
+  async function handleSelecionarArquivo(e) {
+    const file = e.target.files?.[0];
+    if (!file || !implantacaoId) return;
+
+    setEnviando(true);
+    try {
+      const formData = new FormData();
+      formData.append("arquivo", file);
+      formData.append("implantacao_id", implantacaoId);
+
+      if (vincularTambemCliente && clienteId) {
+        formData.append("cliente_id", clienteId);
+      }
+
+      const res = await fetch(`${BASE_URL}/anexos`, {
+        method: "POST",
+        headers: { Accept: "application/json" },
+        body: formData,
+      });
+
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.message || "Falha ao enviar arquivo.");
+      }
+
+      await carregarAnexos();
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setEnviando(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  }
+
+  async function handleRemover(id) {
+    if (!window.confirm("Deseja realmente excluir este anexo da implantação?")) return;
+
+    try {
+      const res = await fetch(`${BASE_URL}/anexos/${id}`, {
+        method: "DELETE",
+        headers: { Accept: "application/json" },
+      });
+
+      if (res.ok) {
+        setAnexos((prev) => prev.filter((a) => a.id !== id));
+      }
+    } catch (err) {
+      alert("Erro ao excluir arquivo: " + err.message);
+    }
+  }
+
+  return (
+    <div className="bg-white rounded-xl border p-6 shadow-2xs space-y-4" style={{ borderColor: "#E2E8F0" }}>
+      <div className="flex items-center justify-between pb-3 border-b flex-wrap gap-3" style={{ borderColor: "#E2E8F0" }}>
+        <div>
+          <h2 className="text-sm font-bold text-[#1E293B]">📎 Documentos & Anexos da Implantação</h2>
+          <p className="text-xs text-[#64748B] mt-0.5">
+            Tabelas de frete, layouts de integração ERP, manuais e homologações assinadas
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          {clienteId && (
+            <label className="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={vincularTambemCliente}
+                onChange={(e) => setVincularTambemCliente(e.target.checked)}
+                className="rounded accent-[#0066CC]"
+              />
+              Vincular também à ficha geral do cliente
+            </label>
+          )}
+
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleSelecionarArquivo}
+            className="hidden"
+          />
+
+          <button
+            type="button"
+            disabled={enviando || !implantacaoId}
+            onClick={() => fileInputRef.current?.click()}
+            className="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white cursor-pointer shadow-xs disabled:opacity-50 flex items-center gap-1.5"
+            style={{ background: "#0066CC" }}
+          >
+            <span>📎</span>
+            <span>{enviando ? "Enviando arquivo..." : "+ Novo Anexo"}</span>
+          </button>
+        </div>
+      </div>
+
+      {carregando && (
+        <div className="text-center py-4 text-xs text-slate-400">Carregando documentos...</div>
+      )}
+
+      <div className="space-y-2">
+        {anexos.map((anexo) => (
+          <div
+            key={anexo.id}
+            className="flex items-center justify-between p-3 rounded-xl border bg-white shadow-2xs hover:border-blue-200 transition-colors"
+            style={{ borderColor: "#E2E8F0" }}
+          >
+            <div className="flex items-center gap-3 min-w-0 pr-3">
+              <span className="text-xl flex-shrink-0">📄</span>
+              <div className="min-w-0">
+                <div className="text-xs font-bold text-[#1E293B] truncate">{anexo.nome}</div>
+                <div className="text-[11px] text-slate-500 flex items-center gap-2 flex-wrap">
+                  <span>{formatBytes(anexo.tamanho)}</span>
+                  <span>•</span>
+                  <span>Enviado em {new Date(anexo.dataUpload).toLocaleDateString("pt-BR")}</span>
+                  {anexo.cliente_id && (
+                    <>
+                      <span>•</span>
+                      <span className="text-blue-600 font-medium bg-blue-50 px-1.5 py-0.5 rounded text-[10px]">
+                        Vinculado ao Cliente
+                      </span>
+                    </>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <a
+                href={`${BASE_URL}/anexos/${anexo.id}/download`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 flex items-center gap-1 cursor-pointer"
+              >
+                <span>Baixar</span>
+                <span>↓</span>
+              </a>
+              <button
+                type="button"
+                onClick={() => handleRemover(anexo.id)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
+                title="Excluir arquivo"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        ))}
+
+        {!carregando && anexos.length === 0 && (
+          <div className="p-8 rounded-xl border border-dashed text-center bg-[#F8FAFC]" style={{ borderColor: "#CBD5E1" }}>
+            <p className="text-xs text-[#94A3B8]">
+              Nenhum documento anexado para esta implantação até o momento.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }
 
 export default function ImplantacaoDetail({ implantacaoId, onBack }) {
@@ -296,6 +494,12 @@ export default function ImplantacaoDetail({ implantacaoId, onBack }) {
             </div>
           </div>
         </div>
+
+        {/* 📎 Seção de Anexos da Implantação */}
+        <AnexosImplantacaoSection
+          implantacaoId={implantacaoId}
+          clienteId={impData?.cliente_id || cliente?.id}
+        />
 
         {/* Checklist Operacional Editável */}
         <div className="bg-white rounded-xl border overflow-hidden shadow-2xs" style={{ borderColor: "#E2E8F0" }}>

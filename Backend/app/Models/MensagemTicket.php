@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
 class MensagemTicket extends Model
@@ -20,11 +21,16 @@ class MensagemTicket extends Model
         'data_envio',
     ];
 
+    protected $casts = [
+        'data_envio' => 'datetime',
+    ];
+
     public function ticket()
     {
         return $this->belongsTo(Ticket::class, 'ticket_id');
     }
 
+    // Se usuario_id for nulo, a mensagem veio do cliente/e-mail externo
     public function usuario()
     {
         return $this->belongsTo(Usuario::class, 'usuario_id');

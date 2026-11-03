@@ -18,6 +18,14 @@ function maskCNPJ(value) {
     .replace(/(\d{4})(\d)/, "$1-$2")
 }
 
+function formatBytes(bytes) {
+  if (!bytes || bytes === 0) return "0 B"
+  const k = 1024
+  const sizes = ["B", "KB", "MB", "GB"]
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i]
+}
+
 function formatMoneyBRL(value) {
   if (value === null || value === undefined || value === "") return "R$ 0,00"
   if (typeof value === "number") {
@@ -91,7 +99,7 @@ function MoneyField({ label, value, onChange, placeholder = "R$ 0,00", required 
   )
 }
 
-// 🏛️ Gestão de Matriz e Filiais (Funciona para cliente novo ou existente)
+// 🏛️ Gestão de Matriz e Filiais
 function EmpresasSection({
   clienteId,
   empresas = [],
@@ -485,7 +493,7 @@ function EmpresasSection({
   )
 }
 
-// 🧩 Seleção dos Módulos Contratados (Estilo igual ao de Transportadoras, no item 2)
+// 🧩 Módulos Adicionais
 function ModulosSelector({ disponiveis = [], selecionados = [], aoAlterar }) {
   const [selecionadoId, setSelecionadoId] = useState("")
 
@@ -570,7 +578,7 @@ function ModulosSelector({ disponiveis = [], selecionados = [], aoAlterar }) {
   )
 }
 
-// 🚚 Seleção das Transportadoras cadastradas da tabela `transportadora`
+// 🚚 Transportadoras Homologadas
 function TransportadorasSelector({ disponiveis = [], selecionadas = [], aoAlterar }) {
   const [selecionadaId, setSelecionadaId] = useState("")
 
@@ -662,7 +670,7 @@ function TransportadorasSelector({ disponiveis = [], selecionadas = [], aoAltera
   )
 }
 
-// 👥 Gestão de Contatos Autorizados
+// 👥 Contatos Autorizados
 function ContatosSection({ contatos = [], onChange }) {
   function addContato() {
     onChange([...contatos, { id: Date.now() + Math.random(), nome: "", email: "" }])
@@ -738,7 +746,213 @@ function ContatosSection({ contatos = [], onChange }) {
   )
 }
 
-// 🗂️ Modal Unificado (Usado tanto para NOVO CLIENTE quanto para EDITAR / VER FICHA)
+// 📎 Gestão de Anexos e Documentos Vinculados ao Cliente
+function AnexosSection({ clienteId, anexosLocais = [], aoAlterarLocais }) {
+  const [anexosSalvos, setAnexosSalvos] = useState([])
+  const [carregando, setCarregando] = useState(false)
+  const [enviando, setEnviando] = useState(false)
+  const fileInputRef = useRef(null)
+
+  const carregarAnexosDoBanco = async () => {
+    if (!clienteId) return
+    setCarregando(true)
+    try {
+      const res = await fetch(`${BASE_URL}/anexos?cliente_id=${clienteId}`)
+      if (res.ok) {
+        const dados = await res.json()
+        setAnexosSalvos(dados)
+      }
+    } catch (err) {
+      console.error("Erro ao listar anexos:", err)
+    } finally {
+      setCarregando(false)
+    }
+  }
+
+  useEffect(() => {
+    if (clienteId) {
+      carregarAnexosDoBanco()
+    }
+  }, [clienteId])
+
+  async function handleSelecionarArquivo(e) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // Se o cliente já está cadastrado no banco, faz upload direto
+    if (clienteId) {
+      setEnviando(true)
+      try {
+        const formData = new FormData()
+        formData.append("arquivo", file)
+        formData.append("cliente_id", clienteId)
+
+        const res = await fetch(`${BASE_URL}/anexos`, {
+          method: "POST",
+          headers: { Accept: "application/json" },
+          body: formData,
+        })
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          throw new Error(err.message || "Falha no envio do anexo.")
+        }
+
+        await carregarAnexosDoBanco()
+      } catch (err) {
+        alert(err.message)
+      } finally {
+        setEnviando(false)
+        if (fileInputRef.current) fileInputRef.current.value = ""
+      }
+    } else {
+      // Se é um cliente sendo criado agora, guarda na memória local para upload ao salvar
+      aoAlterarLocais([...anexosLocais, file])
+      if (fileInputRef.current) fileInputRef.current.value = ""
+    }
+  }
+
+  async function handleRemoverSalvo(id) {
+    if (!window.confirm("Deseja realmente excluir este anexo permanentemente?")) return
+    try {
+      const res = await fetch(`${BASE_URL}/anexos/${id}`, {
+        method: "DELETE",
+        headers: { Accept: "application/json" },
+      })
+      if (res.ok) {
+        setAnexosSalvos((prev) => prev.filter((a) => a.id !== id))
+      }
+    } catch (err) {
+      alert("Erro ao excluir arquivo: " + err.message)
+    }
+  }
+
+  function handleRemoverLocal(idx) {
+    aoAlterarLocais(anexosLocais.filter((_, i) => i !== idx))
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between pb-3 border-b" style={{ borderColor: "#E2E8F0" }}>
+        <div>
+          <h3 className="text-sm font-bold text-[#1E293B]">Documentos & Arquivos do Cliente</h3>
+          <p className="text-xs text-[#64748B]">
+            Contratos assinados, tabelas de frete, manuais e documentações fiscais
+          </p>
+        </div>
+
+        <div>
+          <input
+            type="file"
+            ref={fileInputRef}
+            onChange={handleSelecionarArquivo}
+            className="hidden"
+          />
+          <button
+            type="button"
+            disabled={enviando}
+            onClick={() => fileInputRef.current?.click()}
+            className="px-3.5 py-1.5 rounded-lg text-xs font-semibold text-white cursor-pointer shadow-xs disabled:opacity-50 flex items-center gap-1.5"
+            style={{ background: "#0066CC" }}
+          >
+            <span>📎</span>
+            <span>{enviando ? "Enviando arquivo..." : "+ Novo Anexo"}</span>
+          </button>
+        </div>
+      </div>
+
+      {carregando && (
+        <div className="text-center py-6 text-xs text-slate-400">Carregando documentos...</div>
+      )}
+
+      {/* Lista de anexos locais pendentes (para cliente novo) */}
+      {!clienteId && anexosLocais.length > 0 && (
+        <div className="space-y-2 mb-4">
+          <div className="text-xs font-bold text-amber-600 uppercase tracking-wide">
+            Arquivos na fila (serão salvos ao concluir o cadastro):
+          </div>
+          {anexosLocais.map((file, idx) => (
+            <div
+              key={idx}
+              className="flex items-center justify-between p-3 rounded-xl border bg-amber-50/50 border-amber-200"
+            >
+              <div className="flex items-center gap-2.5 truncate">
+                <span className="text-base">📄</span>
+                <div>
+                  <div className="text-xs font-bold text-[#1E293B] truncate">{file.name}</div>
+                  <div className="text-[11px] text-slate-500">{formatBytes(file.size)}</div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => handleRemoverLocal(idx)}
+                className="text-slate-400 hover:text-red-600 p-1 rounded-lg cursor-pointer text-xs"
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Lista de arquivos persistidos no banco */}
+      <div className="space-y-2">
+        {anexosSalvos.map((anexo) => (
+          <div
+            key={anexo.id}
+            className="flex items-center justify-between p-3 rounded-xl border bg-white shadow-2xs hover:border-blue-200 transition-colors"
+            style={{ borderColor: "#E2E8F0" }}
+          >
+            <div className="flex items-center gap-3 min-w-0 pr-3">
+              <span className="text-xl">📄</span>
+              <div className="min-w-0">
+                <div className="text-xs font-bold text-[#1E293B] truncate">{anexo.nome}</div>
+                <div className="text-[11px] text-slate-500 flex items-center gap-2">
+                  <span>{formatBytes(anexo.tamanho)}</span>
+                  <span>•</span>
+                  <span>Enviado em {new Date(anexo.dataUpload).toLocaleDateString("pt-BR")}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 flex-shrink-0">
+              <a
+                href={`${BASE_URL}/anexos/${anexo.id}/download`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs font-semibold px-2.5 py-1.5 rounded-lg border border-slate-200 hover:bg-slate-50 text-slate-700 flex items-center gap-1 cursor-pointer"
+              >
+                <span>Baixar</span>
+                <span>↓</span>
+              </a>
+              <button
+                type="button"
+                onClick={() => handleRemoverSalvo(anexo.id)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-red-600 hover:bg-red-50 cursor-pointer"
+                title="Excluir arquivo"
+              >
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <polyline points="3 6 5 6 21 6" />
+                  <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        ))}
+
+        {!carregando && anexosSalvos.length === 0 && (!anexosLocais || anexosLocais.length === 0) && (
+          <div className="p-8 rounded-xl border border-dashed text-center bg-[#F8FAFC]" style={{ borderColor: "#CBD5E1" }}>
+            <p className="text-xs text-[#94A3B8]">
+              Nenhum documento anexado para este cliente até o momento.
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// 🗂️ Modal Unificado (Com Aba de Anexos)
 function FichaClienteModal({
   client,
   isNovo = false,
@@ -753,6 +967,7 @@ function FichaClienteModal({
   onEmpresaSetMatriz,
 }) {
   const [activeTab, setActiveTab] = useState("dados")
+  const [anexosLocais, setAnexosLocais] = useState([])
   const [form, setForm] = useState({
     id: client?.id || null,
     nomeFantasia: client?.nomeFantasia || "",
@@ -814,10 +1029,13 @@ function FichaClienteModal({
       return
     }
 
-    onSave({
-      ...form,
-      valorContaFrete: parseMoneyToFloat(form.valorContaFrete),
-    })
+    onSave(
+      {
+        ...form,
+        valorContaFrete: parseMoneyToFloat(form.valorContaFrete),
+      },
+      anexosLocais
+    )
   }
 
   return (
@@ -855,18 +1073,19 @@ function FichaClienteModal({
           </button>
         </div>
 
-        {/* Abas */}
-        <div className="flex items-center gap-1 px-6 border-b bg-[#F8FAFC] flex-shrink-0" style={{ borderColor: "#E2E8F0" }}>
+        {/* Abas de Navegação */}
+        <div className="flex items-center gap-1 px-6 border-b bg-[#F8FAFC] flex-shrink-0 overflow-x-auto" style={{ borderColor: "#E2E8F0" }}>
           {[
             { id: "dados", label: "🏢 Cadastro Geral & Contrato" },
             { id: "empresas", label: `🏛️ Multi-CNPJ & Filiais (${form.empresas.length})` },
             { id: "transportadoras", label: `🚚 Transportadoras (${form.transportadoras.length})` },
             { id: "contatos", label: `👥 Contatos (${form.contatos.length})` },
+            { id: "anexos", label: "📎 Documentos & Anexos" },
           ].map((tab) => (
             <button
               key={tab.id}
               onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-3 text-xs font-semibold border-b-2 transition-all cursor-pointer ${
+              className={`px-4 py-3 text-xs font-semibold border-b-2 transition-all cursor-pointer whitespace-nowrap ${
                 activeTab === tab.id
                   ? "border-[#0066CC] text-[#0066CC] bg-white"
                   : "border-transparent text-[#64748B] hover:text-[#1E293B]"
@@ -907,7 +1126,7 @@ function FichaClienteModal({
                 </div>
               </div>
 
-              {/* Item 2 com Seleção de Plano, Faturamento e Módulos */}
+              {/* Plano & Faturamento */}
               <div className="space-y-3">
                 <h3 className="text-sm font-bold text-[#1E293B]">2. Plano & Faturamento</h3>
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -950,7 +1169,6 @@ function FichaClienteModal({
                   />
                 </div>
 
-                {/* Módulos contratados inseridos no item 2 */}
                 <ModulosSelector
                   disponiveis={modulosList}
                   selecionados={form.modulos}
@@ -988,7 +1206,6 @@ function FichaClienteModal({
                 </div>
               </div>
 
-              {/* Campo de Integração do DER (VARCHAR 500) */}
               <div>
                 <h3 className="text-sm font-bold mb-3 text-[#1E293B]">4. Integrações Técnicas & ERPs</h3>
                 <div>
@@ -1044,6 +1261,14 @@ function FichaClienteModal({
             <ContatosSection
               contatos={form.contatos}
               onChange={(novos) => update("contatos", novos)}
+            />
+          )}
+
+          {activeTab === "anexos" && (
+            <AnexosSection
+              clienteId={form.id}
+              anexosLocais={anexosLocais}
+              aoAlterarLocais={setAnexosLocais}
             />
           )}
         </div>
@@ -1140,7 +1365,7 @@ export default function Clientes() {
     setClienteModal(c)
   }
 
-  async function handleSalvarModal(formData) {
+  async function handleSalvarModal(formData, anexosLocais = []) {
     try {
       if (modoModal === "adicionar") {
         const matriz = formData.empresas.find((e) => e.is_matriz) || formData.empresas[0]
@@ -1179,6 +1404,7 @@ export default function Clientes() {
 
         const novoCliente = await res.json()
 
+        // Cadastra filiais restantes se houver
         const outrasFiliais = formData.empresas.filter((e) => e.cnpj !== matriz.cnpj)
         for (const f of outrasFiliais) {
           await fetch(`${BASE_URL}/cliente-empresas`, {
@@ -1193,6 +1419,21 @@ export default function Clientes() {
               status: f.status || "A",
             }),
           })
+        }
+
+        // Upload de eventuais anexos adicionados durante a criação do cliente
+        if (anexosLocais && anexosLocais.length > 0) {
+          for (const file of anexosLocais) {
+            const fd = new FormData()
+            fd.append("arquivo", file)
+            fd.append("cliente_id", novoCliente.id)
+
+            await fetch(`${BASE_URL}/anexos`, {
+              method: "POST",
+              headers: { Accept: "application/json" },
+              body: fd,
+            })
+          }
         }
       } else {
         const payload = {
@@ -1350,7 +1591,7 @@ export default function Clientes() {
               🏢 Cadastro Geral de Clientes & Filiais (Multi-CNPJ)
             </h1>
             <p className="text-xs mt-0.5" style={{ color: "#64748B" }}>
-              Visão consolidada das contas, contratos e controle individual por CNPJ
+              Visão consolidada das contas, contratos, documentações e controle individual por CNPJ
             </p>
           </div>
           <button

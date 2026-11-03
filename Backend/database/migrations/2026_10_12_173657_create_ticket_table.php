@@ -15,7 +15,7 @@ return new class extends Migration
             $table->id();
 
             // Chaves Estrangeiras
-            $table->foreignId('cliente_id')->constrained('cliente')->cascadeOnDelete();
+            $table->foreignId('cliente_id')->nullable()->constrained('cliente')->nullOnDelete();
             $table->foreignId('status_id')->nullable()->constrained('status_config')->nullOnDelete();
             $table->foreignId('canal_id')->nullable()->constrained('canal_config')->nullOnDelete();
             $table->foreignId('categoria_id')->nullable()->constrained('categoria_config')->nullOnDelete();
