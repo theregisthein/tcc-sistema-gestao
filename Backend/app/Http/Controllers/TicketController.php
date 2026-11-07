@@ -122,15 +122,19 @@ class TicketController extends Controller
                 $ticket->usuarios()->sync($request->usuarios);
             }
 
+            $usuarioId = auth()->id() ?? $request->usuario_id ?? 1;
+
             $mensagem = MensagemTicket::create([
                 'ticket_id'   => $ticket->id,
-                'usuario_id'  => auth()->id() ?? $request->usuario_id,
-                'assunto'     => $request->titulo,
+                'usuario_id'  => $usuarioId,
+                'assunto'     => '[TICKET #' . $ticket->id . '] ' . $request->titulo,
                 'corpo_html'  => nl2br(e($request->mensagem)),
                 'corpo_texto' => $request->mensagem,
+                'eh_interna'  => false,
                 'data_envio'  => Carbon::now(),
             ]);
 
+            $anexosParaEmail = [];
             if ($request->hasFile('anexos')) {
                 foreach ($request->file('anexos') as $file) {
                     $caminho = $file->store('anexos_tickets', 'public');
@@ -143,6 +147,40 @@ class TicketController extends Controller
                         'extensao'     => $file->getClientOriginalExtension(),
                         'tamanhoBytes' => $file->getSize(),
                     ]);
+
+                    $anexosParaEmail[] = storage_path('app/public/' . $caminho);
+                }
+            }
+
+            // Descobre o destinatário do cliente cadastrado
+            $destinatarioEmail = null;
+            if ($ticket->cliente_id) {
+                $cliente = Cliente::with('contatos')->find($ticket->cliente_id);
+                if ($cliente) {
+                    $destinatarioEmail = $cliente->emailAdm ?? $cliente->contatos->first()?->email;
+                }
+            }
+
+            // Dispara e-mail de abertura para o cliente
+            if ($destinatarioEmail && filter_var($destinatarioEmail, FILTER_VALIDATE_EMAIL)) {
+                try {
+                    $assuntoEmail = '[TICKET #' . $ticket->id . '] ' . $ticket->titulo;
+                    $corpoTexto   = $request->mensagem;
+
+                    Mail::raw($corpoTexto, function ($mail) use ($destinatarioEmail, $assuntoEmail, $anexosParaEmail) {
+                        $mail->to($destinatarioEmail)
+                             ->subject($assuntoEmail);
+
+                        foreach ($anexosParaEmail as $pathArquivo) {
+                            if (file_exists($pathArquivo)) {
+                                $mail->attach($pathArquivo);
+                            }
+                        }
+                    });
+
+                    Log::info("E-mail de abertura do Ticket #{$ticket->id} enviado com sucesso para: {$destinatarioEmail}");
+                } catch (\Exception $e) {
+                    Log::error('Erro no envio SMTP ao criar Ticket #' . $ticket->id . ': ' . $e->getMessage());
                 }
             }
 
@@ -220,6 +258,7 @@ class TicketController extends Controller
                 'assunto'     => $prefixoAssunto . $assuntoLimpo,
                 'corpo_html'  => nl2br(e($request->mensagem)),
                 'corpo_texto' => $request->mensagem,
+                'eh_interna'  => $ehInterna, // <-- Persiste 1 ou 0 explicitamente - ALTERADO PARA SALVAR A INFORMACAO NO BANCO E NAO APENAS NOCONTROLLER/FRONT
                 'data_envio'  => Carbon::now(),
             ]);
 

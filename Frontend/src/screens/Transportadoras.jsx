@@ -2,13 +2,23 @@ import { useState, useEffect } from "react";
 
 const URL_API = "http://localhost:8000/api/transportadoras";
 
+function maskCNPJ(value) {
+  return String(value || "")
+    .replace(/\D/g, "")
+    .slice(0, 14)
+    .replace(/^(\d{2})(\d)/, "$1.$2")
+    .replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3")
+    .replace(/\.(\d{3})(\d)/, ".$1/$2")
+    .replace(/(\d{4})(\d)/, "$1-$2");
+}
+
 function ModalTransportadora({ transportadora, modo, aoFechar, aoSalvar }) {
   const [formulario, setFormulario] = useState(
     transportadora
       ? {
           id: transportadora.id,
           nome: transportadora.nome || "",
-          cnpj: transportadora.cnpj || "",
+          cnpj: maskCNPJ(transportadora.cnpj) || "",
           email: transportadora.email || "",
           status: transportadora.status || "A",
         }
@@ -16,7 +26,8 @@ function ModalTransportadora({ transportadora, modo, aoFechar, aoSalvar }) {
   );
 
   function atualizarCampo(campo, valor) {
-    setFormulario((anterior) => ({ ...anterior, [campo]: valor }));
+    const valorTratado = campo === "cnpj" ? maskCNPJ(valor) : valor;
+    setFormulario((anterior) => ({ ...anterior, [campo]: valorTratado }));
   }
 
   return (
@@ -41,12 +52,12 @@ function ModalTransportadora({ transportadora, modo, aoFechar, aoSalvar }) {
             </div>
             <div>
               <div className="text-sm font-medium" style={{ color: "#1E293B" }}>{formulario.nome || "Nome da transportadora"}</div>
-              <div className="text-xs" style={{ color: "#64748B" }}>{formulario.cnpj || "CNPJ"}</div>
+              <div className="text-xs font-mono" style={{ color: "#64748B" }}>{formulario.cnpj || "00.000.000/0000-00"}</div>
             </div>
           </div>
 
           <CampoTexto label="Nome / Razão Social" valor={formulario.nome} aoMudar={(v) => atualizarCampo("nome", v)} placeholder="Ex: Transportadora XYZ Ltda" />
-          <CampoTexto label="CNPJ" valor={formulario.cnpj} aoMudar={(v) => atualizarCampo("cnpj", v)} placeholder="00.000.000/0001-00" />
+          <CampoTexto label="CNPJ" valor={formulario.cnpj} aoMudar={(v) => atualizarCampo("cnpj", v)} placeholder="00.000.000/0000-00" />
           <CampoTexto label="E-mail Operacional" valor={formulario.email} aoMudar={(v) => atualizarCampo("email", v)} placeholder="operacional@transportadora.com.br" tipo="email" />
 
           <div>
@@ -60,7 +71,7 @@ function ModalTransportadora({ transportadora, modo, aoFechar, aoSalvar }) {
                   key={opcao.valor}
                   type="button"
                   onClick={() => atualizarCampo("status", opcao.valor)}
-                  className="flex-1 py-2 rounded-lg text-xs font-semibold border transition-colors"
+                  className="flex-1 py-2 rounded-lg text-xs font-semibold border transition-colors cursor-pointer"
                   style={{
                     borderColor: formulario.status === opcao.valor ? (opcao.valor === "A" ? "#10B981" : "#E11D48") : "#E2E8F0",
                     background: formulario.status === opcao.valor ? (opcao.valor === "A" ? "#ECFDF5" : "#FFF1F2") : "transparent",
@@ -75,12 +86,12 @@ function ModalTransportadora({ transportadora, modo, aoFechar, aoSalvar }) {
         </div>
 
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t" style={{ borderColor: "#E2E8F0" }}>
-          <button onClick={aoFechar} className="px-4 py-2 rounded-lg text-sm font-medium border" style={{ borderColor: "#E2E8F0", color: "#64748B" }}>
+          <button onClick={aoFechar} className="px-4 py-2 rounded-lg text-sm font-medium border cursor-pointer" style={{ borderColor: "#E2E8F0", color: "#64748B" }}>
             Cancelar
           </button>
           <button
             onClick={() => aoSalvar(formulario)}
-            className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+            className="px-4 py-2 rounded-lg text-sm font-semibold text-white cursor-pointer"
             style={{ background: "#0066CC" }}
           >
             {modo === "adicionar" ? "Adicionar" : "Salvar Alterações"}
@@ -186,11 +197,17 @@ export default function Transportadoras() {
     }
   }
 
-  const filtrados = lista.filter((t) =>
-    !busca ||
-    (t.nome && t.nome.toLowerCase().includes(busca.toLowerCase())) ||
-    (t.cnpj && t.cnpj.includes(busca))
-  );
+  const filtrados = lista.filter((t) => {
+    if (!busca) return true;
+    const buscaLower = busca.toLowerCase();
+    const buscaNumeros = busca.replace(/\D/g, "");
+
+    const matchNome = t.nome && t.nome.toLowerCase().includes(buscaLower);
+    const matchCnpjFormatado = t.cnpj && maskCNPJ(t.cnpj).includes(busca);
+    const matchCnpjNumeros = buscaNumeros && t.cnpj && String(t.cnpj).replace(/\D/g, "").includes(buscaNumeros);
+
+    return matchNome || matchCnpjFormatado || matchCnpjNumeros;
+  });
 
   return (
     <div className="flex-1 flex flex-col overflow-hidden" style={{ background: "#F4F6F9" }}>
@@ -202,7 +219,7 @@ export default function Transportadoras() {
           </div>
           <button
             onClick={abrirAdicionar}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white"
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold text-white cursor-pointer"
             style={{ background: "#0066CC" }}
             onMouseEnter={(e) => { e.currentTarget.style.background = "#0054a8"; }}
             onMouseLeave={(e) => { e.currentTarget.style.background = "#0066CC"; }}
@@ -257,7 +274,7 @@ export default function Transportadoras() {
                   <td className="px-4 py-3">
                     <div className="font-medium" style={{ color: "#1E293B" }}>{t.nome}</div>
                   </td>
-                  <td className="px-4 py-3 text-xs font-mono" style={{ color: "#1E293B" }}>{t.cnpj}</td>
+                  <td className="px-4 py-3 text-xs font-mono" style={{ color: "#1E293B" }}>{maskCNPJ(t.cnpj)}</td>
                   <td className="px-4 py-3 text-xs" style={{ color: "#64748B" }}>{t.email || "-"}</td>
                   <td className="px-4 py-3">
                     <span
@@ -270,7 +287,7 @@ export default function Transportadoras() {
                   <td className="px-4 py-3">
                     <button
                       onClick={() => abrirEditar(t)}
-                      className="text-xs font-medium transition-colors"
+                      className="text-xs font-medium transition-colors cursor-pointer"
                       style={{ color: "#0066CC" }}
                       onMouseEnter={(e) => { e.currentTarget.style.color = "#0054a8"; }}
                       onMouseLeave={(e) => { e.currentTarget.style.color = "#0066CC"; }}

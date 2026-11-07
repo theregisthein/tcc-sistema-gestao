@@ -15,11 +15,11 @@ return new class extends Migration
             $table->id();
 
             // Chaves Estrangeiras
-            $table->foreignId('cliente_id')->nullable()->constrained('cliente')->nullOnDelete();
-            $table->foreignId('status_id')->nullable()->constrained('status_config')->nullOnDelete();
-            $table->foreignId('canal_id')->nullable()->constrained('canal_config')->nullOnDelete();
-            $table->foreignId('categoria_id')->nullable()->constrained('categoria_config')->nullOnDelete();
-            $table->foreignId('prioridade_id')->nullable()->constrained('prioridade_config')->nullOnDelete();
+            $table->foreignId('cliente_id')->nullable()->constrained('cliente')->restrictOnDelete();
+            $table->foreignId('status_id')->nullable()->constrained('status_config')->restrictOnDelete();
+            $table->foreignId('canal_id')->nullable()->constrained('canal_config')->restrictOnDelete();
+            $table->foreignId('categoria_id')->nullable()->constrained('categoria_config')->restrictOnDelete();
+            $table->foreignId('prioridade_id')->nullable()->constrained('prioridade_config')->restrictOnDelete();
             
             // Datas e Prazos
             $table->dateTime('dataCriacao')->useCurrent();

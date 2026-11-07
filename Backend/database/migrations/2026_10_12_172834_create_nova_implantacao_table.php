@@ -14,10 +14,10 @@ return new class extends Migration
         Schema::create('nova_implantacao', function (Blueprint $table) {
             $table->id();
             // FK para cliente
-            $table->foreignId('cliente_id')->constrained('cliente')->cascadeOnDelete();
+            $table->foreignId('cliente_id')->constrained('cliente')->restrictOnDelete();
 
             // FK para usuario (responsável)
-            $table->foreignId('responsavel')->nullable()->constrained('usuario', 'id')->nullOnDelete();
+            $table->foreignId('responsavel')->nullable()->constrained('usuario', 'id')->restrictOnDelete();
 
             $table->char('status', 1)->default('A');
             $table->time('tempo')->nullable();

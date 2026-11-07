@@ -24,7 +24,7 @@ return new class extends Migration
             $table->char('status', 1)->default('A');
             
             // Chave estrangeira para Plano
-            $table->foreignId('plano_id')->nullable()->constrained('plano')->nullOnDelete();
+            $table->foreignId('plano_id')->nullable()->constrained('plano')->restrictOnDelete();
             
             $table->string('integracao', 500)->nullable();
             $table->timestamps();

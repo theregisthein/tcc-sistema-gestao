@@ -3,6 +3,8 @@ import { useState, useRef, useEffect } from "react";
 const BASE_URL = "http://localhost:8000/api";
 const STORAGE_URL = "http://localhost:8000/storage";
 
+
+
 const STATUS_COLORS = {
   "Aberto": { bg: "#EBF4FF", color: "#0066CC" },
   "A fazer": { bg: "#FFF1E8", color: "#F26522" },
@@ -357,7 +359,7 @@ export default function TicketDetail({ ticketId, onBack }) {
           <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
             {mensagens.map((msg) => {
               const isOutgoing = Boolean(msg.usuario_id);
-              const isNotaInterna = msg.assunto && msg.assunto.includes("[NOTA INTERNA]");
+              const isNotaInterna = Boolean(msg.eh_interna) || (msg.assunto && msg.assunto.includes("[NOTA INTERNA]")); //VALIDA SE E NOTA INTERNA
               const remetenteFrom = msg.destinatarios?.find((d) => d.tipo === "from");
               
               const autorNome = isOutgoing
