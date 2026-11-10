@@ -359,7 +359,7 @@ function CrudPrioridadeApi({ prioridades, onReload, lockedNames = ["Alta", "Méd
                   <span className="text-sm font-medium" style={{ color: "#1E293B" }}>
                     {item.nome}
                   </span>
-                  <span className="text-xs px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-mono">
+                  <span className="text-xs px-2.5 py-0.5 rounded bg-slate-100 text-slate-600 font-mono">
                     SLA: {item.prazo || "Sem prazo"}
                   </span>
                 </div>
@@ -995,9 +995,33 @@ function Section({ title, children }) {
 }
 
 export default function Configuracoes() {
-  const [emailSync, setEmailSync] = useState(true);
-  const [emailAddress, setEmailAddress] = useState("suporte@fretegestao.com.br");
+  const [emailSync, setEmailSync] = useState(false);
+  const [emailAddress, setEmailAddress] = useState("");
+  const [novaSenhaApp, setNovaSenhaApp] = useState("");
   const [prioridades, setPrioridades] = useState([]);
+  const [carregandoEmail, setCarregandoEmail] = useState(true);
+
+  // Estados para modal de autorização com senha
+  const [modalSenhaAberto, setModalSenhaAberto] = useState(false);
+  const [senhaConfirmacao, setSenhaConfirmacao] = useState("");
+  const [salvandoEmail, setSalvandoEmail] = useState(false);
+  const [emailFeedback, setEmailFeedback] = useState(null);
+
+  const carregarConfigEmail = async () => {
+    try {
+      setCarregandoEmail(true);
+      const res = await fetch(`${BASE_URL}/configuracoes/email`);
+      if (res.ok) {
+        const dados = await res.json();
+        setEmailAddress(dados.usuario || "");
+        setEmailSync(Boolean(dados.ativo));
+      }
+    } catch (err) {
+      console.error("Erro ao carregar email_config:", err);
+    } finally {
+      setCarregandoEmail(false);
+    }
+  };
 
   const carregarPrioridades = async () => {
     try {
@@ -1011,8 +1035,78 @@ export default function Configuracoes() {
   };
 
   useEffect(() => {
+    carregarConfigEmail();
     carregarPrioridades();
   }, []);
+
+  // Alterna o status (liga/desliga) com persistência imediata e notificação para o Topbar
+  async function handleToggleEmailSync() {
+    const proximoStatus = !emailSync;
+    setEmailSync(proximoStatus);
+
+    try {
+      const res = await fetch(`${BASE_URL}/configuracoes/email/toggle`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ ativo: proximoStatus }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) throw new Error(data.message || "Erro ao atualizar status");
+
+      window.dispatchEvent(new CustomEvent("email-sync-changed", { detail: { ativo: data.ativo } }));
+    } catch (err) {
+      console.error("Erro no toggle:", err);
+      setEmailSync(!proximoStatus);
+      alert("Falha ao comunicar com o servidor para alternar a sincronização.");
+    }
+  }
+
+  async function handleSalvarConfigEmail(e) {
+    e.preventDefault();
+    setSalvandoEmail(true);
+    setEmailFeedback(null);
+
+    const usuarioLogado = JSON.parse(localStorage.getItem("user") || "{}");
+
+    try {
+      const res = await fetch(`${BASE_URL}/configuracoes/email`, {
+        method: "PUT",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          usuario: emailAddress,
+          ativo: emailSync,
+          senha_admin: senhaConfirmacao,
+          senha_app: novaSenhaApp || null,
+          user_id: usuarioLogado.id,
+        }),
+      });
+
+      const json = await res.json();
+
+      if (!res.ok) {
+        throw new Error(json.message || "Erro ao salvar alterações.");
+      }
+
+      setEmailFeedback({ tipo: "sucesso", texto: json.message });
+      setNovaSenhaApp("");
+      setSenhaConfirmacao("");
+      setModalSenhaAberto(false);
+      window.dispatchEvent(new CustomEvent("email-sync-changed", { detail: { ativo: emailSync } }));
+      setTimeout(() => setEmailFeedback(null), 4000);
+    } catch (err) {
+      setEmailFeedback({ tipo: "erro", texto: err.message });
+    } finally {
+      setSalvandoEmail(false);
+    }
+  }
 
   return (
     <div className="flex-1 overflow-y-auto" style={{ background: "#F4F6F9" }}>
@@ -1029,6 +1123,18 @@ export default function Configuracoes() {
         {/* Email integration */}
         <Section title="📧 Ingestão Automática de E-mails Corporativos">
           <div className="space-y-4">
+            {emailFeedback && (
+              <div
+                className={`p-3 rounded-lg text-xs font-semibold ${
+                  emailFeedback.tipo === "sucesso"
+                    ? "bg-emerald-50 text-emerald-800 border border-emerald-200"
+                    : "bg-red-50 text-red-700 border border-red-200"
+                }`}
+              >
+                {emailFeedback.texto}
+              </div>
+            )}
+
             <div
               className="flex items-center justify-between p-4 rounded-xl border"
               style={{ borderColor: "#E2E8F0", background: "#F8FAFC" }}
@@ -1042,7 +1148,8 @@ export default function Configuracoes() {
                 </div>
               </div>
               <button
-                onClick={() => setEmailSync(!emailSync)}
+                type="button"
+                onClick={handleToggleEmailSync}
                 className="relative w-11 h-6 rounded-full transition-all flex-shrink-0 cursor-pointer"
                 style={{ background: emailSync ? "#10B981" : "#CBD5E1" }}
               >
@@ -1052,6 +1159,7 @@ export default function Configuracoes() {
                 />
               </button>
             </div>
+
             <div>
               <label className="text-xs font-medium block mb-1.5" style={{ color: "#64748B" }}>
                 Conta de E-mail Monitorada
@@ -1059,13 +1167,94 @@ export default function Configuracoes() {
               <input
                 type="email"
                 value={emailAddress}
+                disabled={carregandoEmail}
                 onChange={(e) => setEmailAddress(e.target.value)}
-                className="w-full text-sm border rounded-lg px-3 py-2 outline-none"
+                placeholder="suporte@fretegestao.com.br"
+                className="w-full text-sm border rounded-lg px-3 py-2 outline-none font-mono"
                 style={{ borderColor: "#E2E8F0", color: "#1E293B", background: "#fff" }}
               />
             </div>
+
+            <div>
+              <label className="text-xs font-medium block mb-1.5" style={{ color: "#64748B" }}>
+                Atualizar Senha de Aplicativo Google (opcional)
+              </label>
+              <input
+                type="password"
+                value={novaSenhaApp}
+                onChange={(e) => setNovaSenhaApp(e.target.value)}
+                placeholder="Deixe em branco para manter a senha atual"
+                className="w-full text-sm border rounded-lg px-3 py-2 outline-none font-mono"
+                style={{ borderColor: "#E2E8F0", color: "#1E293B", background: "#fff" }}
+              />
+              <span className="text-[11px] text-slate-400 mt-1 block">
+                Senha de 16 caracteres gerada no painel de Segurança da Conta Google (App Passwords).
+              </span>
+            </div>
+
+            <div className="pt-2 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setModalSenhaAberto(true)}
+                className="px-4 py-2 rounded-lg text-xs font-semibold text-white shadow-xs cursor-pointer transition-all"
+                style={{ background: "#0066CC" }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = "#0054a8"; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = "#0066CC"; }}
+              >
+                Salvar Configurações
+              </button>
+            </div>
           </div>
         </Section>
+
+        {/* Modal de Confirmação com Senha de Usuário */}
+        {modalSenhaAberto && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center p-4"
+            style={{ background: "rgba(11,40,71,0.6)", backdropFilter: "blur(2px)" }}
+          >
+            <div className="bg-white rounded-xl shadow-xl w-full max-w-sm p-5 border" style={{ borderColor: "#E2E8F0" }}>
+              <h3 className="text-sm font-bold text-slate-800 mb-1">Confirmar Alteração</h3>
+              <p className="text-xs text-slate-500 mb-4">
+                Digite a sua senha de acesso ao sistema para confirmar a alteração das credenciais de e-mail.
+              </p>
+
+              <form onSubmit={handleSalvarConfigEmail} className="space-y-4">
+                <input
+                  type="password"
+                  required
+                  value={senhaConfirmacao}
+                  onChange={(e) => setSenhaConfirmacao(e.target.value)}
+                  placeholder="Sua senha de login..."
+                  className="w-full text-xs border rounded-lg px-3 py-2 outline-none"
+                  style={{ borderColor: "#CBD5E1", color: "#1E293B" }}
+                  autoFocus
+                />
+
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setModalSenhaAberto(false);
+                      setSenhaConfirmacao("");
+                    }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-medium border text-slate-600 hover:bg-slate-50 cursor-pointer"
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={salvandoEmail || !senhaConfirmacao}
+                    className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white cursor-pointer disabled:opacity-50"
+                    style={{ background: "#0066CC" }}
+                  >
+                    {salvandoEmail ? "Confirmando..." : "Confirmar e Gravar"}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
 
         {/* SLAs e Prazos com PrioridadeConfig */}
         <Section title="⏱️ Gestão de SLAs e Prazos por Prioridade">

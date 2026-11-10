@@ -15,16 +15,32 @@ import Configuracoes from "./screens/Configuracoes";
 import Relatorios from "./screens/Relatorios";
 
 export default function App() {
-  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [isLoggedIn, setIsLoggedIn] = useState(() => {
+    return Boolean(localStorage.getItem("user") || localStorage.getItem("token"));
+  });
+
   const [currentScreen, setCurrentScreen] = useState(() => {
     if (typeof window !== "undefined") {
       const path = window.location.pathname.replace(/^\//, "") || window.location.hash.replace(/^#\/?/, "");
-      if (["dashboard", "tickets", "implantacoes", "implantacao-detail", "nova-implantacao", "relatorios", "clientes", "transportadoras", "usuarios", "configuracoes"].includes(path)) {
+      if ([
+        "dashboard",
+        "tickets",
+        "ticket-detail",
+        "implantacoes",
+        "implantacao-detail",
+        "nova-implantacao",
+        "relatorios",
+        "clientes",
+        "transportadoras",
+        "usuarios",
+        "configuracoes"
+      ].includes(path)) {
         return path;
       }
     }
     return "dashboard";
   });
+
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [ticketStatusFilter, setTicketStatusFilter] = useState(undefined);
   const [selectedTicketId, setSelectedTicketId] = useState(0);
@@ -36,6 +52,12 @@ export default function App() {
     if (typeof window !== "undefined" && window.history?.replaceState) {
       window.history.replaceState(null, "", screen === "dashboard" ? "/" : `/${screen}`);
     }
+  }
+
+  function handleLogout() {
+    localStorage.removeItem("user");
+    localStorage.removeItem("token");
+    setIsLoggedIn(false);
   }
 
   if (!isLoggedIn) {
@@ -75,7 +97,7 @@ export default function App() {
       <Sidebar
         currentScreen={currentScreen}
         onNavigate={handleNavigate}
-        onLogout={() => setIsLoggedIn(false)}
+        onLogout={handleLogout}
         collapsed={sidebarCollapsed}
         onToggle={() => setSidebarCollapsed(!sidebarCollapsed)}
       />

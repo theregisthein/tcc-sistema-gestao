@@ -1,8 +1,67 @@
-import { useState } from "react";
-import { CURRENT_USER } from "../data/mock";
+import { useState, useEffect } from "react";
+
+const BASE_URL = "http://localhost:8000/api";
 
 export default function Topbar() {
   const [query, setQuery] = useState("");
+  const [syncAtivo, setSyncAtivo] = useState(false);
+  const [sincronizando, setSincronizando] = useState(false);
+
+  async function carregarStatus() {
+    try {
+      const res = await fetch(`${BASE_URL}/configuracoes/email`);
+      if (res.ok) {
+        const dados = await res.json();
+        setSyncAtivo(Boolean(dados.ativo));
+      }
+    } catch (e) {
+      console.error("Erro ao verificar status do email:", e);
+    }
+  }
+
+  useEffect(() => {
+    carregarStatus();
+
+    function handleSyncEvent(e) {
+      if (e.detail && typeof e.detail.ativo !== "undefined") {
+        setSyncAtivo(Boolean(e.detail.ativo));
+      } else {
+        carregarStatus();
+      }
+    }
+
+    window.addEventListener("email-sync-changed", handleSyncEvent);
+    return () => window.removeEventListener("email-sync-changed", handleSyncEvent);
+  }, []);
+
+  async function handleForcarSync() {
+    if (sincronizando) return;
+    try {
+      setSincronizando(true);
+      const res = await fetch(`${BASE_URL}/configuracoes/email/toggle`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({ ativo: true }),
+      });
+      if (res.ok) {
+        setSyncAtivo(true);
+        window.dispatchEvent(new CustomEvent("email-sync-changed", { detail: { ativo: true } }));
+      }
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSincronizando(false);
+    }
+  }
+
+  const usuario = JSON.parse(localStorage.getItem("user") || "{}");
+  const primeiroNome = usuario.nome ? usuario.nome.split(" ")[0] : "Usuário";
+  const iniciais = usuario.nome
+    ? usuario.nome.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase()
+    : "RR";
 
   return (
     <header
@@ -38,23 +97,34 @@ export default function Topbar() {
         />
       </div>
 
-      {/* Email sync indicator */}
-      <div
-        className="flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium"
-        style={{ background: "#ECFDF5", color: "#059669" }}
+      {/* Email sync indicator dinâmico */}
+      <button
+        type="button"
+        onClick={handleForcarSync}
+        title={syncAtivo ? "Clique para forçar sincronização manual agora" : "Sincronização desativada nas configurações"}
+        className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium border transition-all cursor-pointer ${
+          syncAtivo
+            ? "bg-[#ECFDF5] text-[#059669] border-[#A7F3D0] hover:bg-[#D1FAE5]"
+            : "bg-[#F1F5F9] text-[#64748B] border-[#E2E8F0] hover:bg-slate-200"
+        }`}
       >
         <span className="relative flex h-2 w-2">
+          {syncAtivo && (
+            <span
+              className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
+              style={{ background: "#10B981" }}
+            />
+          )}
           <span
-            className="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75"
-            style={{ background: "#10B981" }}
+            className="relative inline-flex rounded-full h-2 w-2"
+            style={{ background: syncAtivo ? "#10B981" : "#94A3B8" }}
           />
-          <span className="relative inline-flex rounded-full h-2 w-2" style={{ background: "#10B981" }} />
         </span>
-        Sync de E-mails Ativo
-      </div>
+        {sincronizando ? "Sincronizando..." : syncAtivo ? "Sync de E-mails Ativo" : "Sync Pausado"}
+      </button>
 
       {/* Notifications */}
-      <button className="relative p-2 rounded-lg hover:bg-[#F4F6F9] transition-colors" title="Notificações de SLA">
+      <button className="relative p-2 rounded-lg hover:bg-[#F4F6F9] transition-colors cursor-pointer" title="Notificações de SLA">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#64748B" strokeWidth="2">
           <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
           <path d="M13.73 21a2 2 0 0 1-3.46 0" />
@@ -73,11 +143,15 @@ export default function Topbar() {
           className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-semibold text-white flex-shrink-0"
           style={{ background: "#0066CC" }}
         >
-          {CURRENT_USER.initials}
+          {iniciais}
         </div>
         <div className="hidden sm:block">
-          <div className="text-sm font-medium" style={{ color: "#1E293B" }}>{CURRENT_USER.name}</div>
-          <div className="text-xs" style={{ color: "#64748B" }}>{CURRENT_USER.role}</div>
+          <div className="text-sm font-medium" style={{ color: "#1E293B" }}>
+            {usuario.nome || "Régis Rinaldi"}
+          </div>
+          <div className="text-xs" style={{ color: "#64748B" }}>
+            {usuario.setor || "Analista de Suporte"}
+          </div>
         </div>
       </div>
     </header>

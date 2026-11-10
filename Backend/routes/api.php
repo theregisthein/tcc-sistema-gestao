@@ -18,6 +18,9 @@ use App\Http\Controllers\ChecklistController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\AnexoController;
 use App\Http\Controllers\TicketController;
+use App\Http\Controllers\DashboardController;
+use App\Http\Controllers\RelatorioController;
+use App\Http\Controllers\EmailConfigController;
 
 use Illuminate\Support\Facades\Route;
 
@@ -69,3 +72,16 @@ Route::delete('/anexos/{id}', [AnexoController::class, 'destroy']);
 Route::get('/tickets/auxiliares', [TicketController::class, 'auxiliares']);
 Route::post('/tickets/{id}/responder', [TicketController::class, 'responder']);
 Route::apiResource('tickets', TicketController::class);
+
+//Dashboard
+Route::get('/dashboard/stats', [DashboardController::class, 'stats']);
+
+//Relatorio
+Route::get('/relatorios/auxiliares', [RelatorioController::class, 'auxiliares']);
+Route::get('/relatorios/vinculos', [RelatorioController::class, 'vinculos']);
+
+//E-mail
+Route::get('/configuracoes/email', [EmailConfigController::class, 'show']);
+Route::put('/configuracoes/email', [EmailConfigController::class, 'update']);
+//Ativar servico via botao nas configuracoes
+Route::post('/configuracoes/email/toggle', [EmailConfigController::class, 'toggle']);
