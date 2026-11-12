@@ -1,13 +1,13 @@
-import { CURRENT_USER } from "../data/mock";
+import { useState, useEffect } from "react";
 
 const navItems = [
-  { id: "dashboard",       label: "Dashboard Geral",         icon: ChartIcon,    group: null },
-  { id: "tickets",         label: "Tickets de Suporte",      icon: TicketIcon,   group: "MÓDULO SUPORTE" },
-  { id: "implantacoes",    label: "Projetos de Implantação", icon: RocketIcon,   group: "MÓDULO IMPLANTAÇÃO" },
+  { id: "dashboard",       label: "Dashboard Geral",         icon: ChartIcon,     group: null },
+  { id: "tickets",         label: "Tickets de Suporte",      icon: TicketIcon,    group: "MÓDULO SUPORTE" },
+  { id: "implantacoes",    label: "Projetos de Implantação", icon: RocketIcon,    group: "MÓDULO IMPLANTAÇÃO" },
   { id: "relatorios",      label: "Relatórios",              icon: BarChart3Icon, group: "RELATÓRIOS & CONSULTAS" },
-  { id: "clientes",        label: "Clientes",                icon: BuildingIcon, group: "CADASTROS BASE" },
-  { id: "transportadoras", label: "Transportadoras",         icon: TruckIcon,    group: null },
-  { id: "usuarios",        label: "Usuários do Sistema",     icon: UsersIcon,    group: null },
+  { id: "clientes",        label: "Clientes",                icon: BuildingIcon,  group: "CADASTROS BASE" },
+  { id: "transportadoras", label: "Transportadoras",         icon: TruckIcon,     group: null },
+  { id: "usuarios",        label: "Usuários do Sistema",     icon: UsersIcon,     group: null },
 ];
 
 function BarChart3Icon() {
@@ -88,7 +88,45 @@ function LogoutIcon() {
   );
 }
 
+function calcularIniciais(nome) {
+  if (!nome) return "US";
+  const parts = nome.trim().split(" ").filter(Boolean);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+  }
+  return nome.slice(0, 2).toUpperCase();
+}
+
 export default function Sidebar({ currentScreen, onNavigate, onLogout, collapsed, onToggle }) {
+  const [usuario, setUsuario] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("user") || "{}");
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    function syncUser() {
+      try {
+        setUsuario(JSON.parse(localStorage.getItem("user") || "{}"));
+      } catch {
+        setUsuario({});
+      }
+    }
+
+    window.addEventListener("storage", syncUser);
+    window.addEventListener("user-updated", syncUser);
+    return () => {
+      window.removeEventListener("storage", syncUser);
+      window.removeEventListener("user-updated", syncUser);
+    };
+  }, [currentScreen]);
+
+  const nomeExibicao = usuario.nome || "Usuário";
+  const setorExibicao = usuario.setor || "Equipe Interna";
+  const iniciais = calcularIniciais(nomeExibicao);
+
   let lastGroup = "__init__";
 
   return (
@@ -98,7 +136,6 @@ export default function Sidebar({ currentScreen, onNavigate, onLogout, collapsed
     >
       {/* Logo / expand toggle */}
       <div className="flex items-center gap-3 px-4 py-5 border-b border-white/10">
-        {/* Clicking the FG badge also expands when collapsed */}
         <button
           onClick={collapsed ? onToggle : undefined}
           className="flex-shrink-0 w-8 h-8 rounded-lg flex items-center justify-center font-bold text-sm"
@@ -116,7 +153,7 @@ export default function Sidebar({ currentScreen, onNavigate, onLogout, collapsed
         {!collapsed && (
           <button
             onClick={onToggle}
-            className="ml-auto text-white/40 hover:text-white/80 transition-colors flex-shrink-0"
+            className="ml-auto text-white/40 hover:text-white/80 transition-colors flex-shrink-0 cursor-pointer"
             title="Recolher menu"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -150,7 +187,7 @@ export default function Sidebar({ currentScreen, onNavigate, onLogout, collapsed
               <button
                 onClick={() => onNavigate(item.id)}
                 title={collapsed ? item.label : undefined}
-                className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-all duration-150 relative group
+                className={`w-full flex items-center gap-3 px-4 py-2.5 text-sm transition-all duration-150 relative group cursor-pointer
                   ${isActive ? "text-white font-medium" : "text-white/60 hover:text-white hover:bg-white/5"}`}
                 style={isActive ? { background: "rgba(0,102,204,0.25)" } : {}}
               >
@@ -170,14 +207,14 @@ export default function Sidebar({ currentScreen, onNavigate, onLogout, collapsed
         <button
           onClick={() => onNavigate("configuracoes")}
           title={collapsed ? "Configurações" : undefined}
-          className={`w-full flex items-center gap-3 px-4 py-3 text-sm transition-colors
+          className={`w-full flex items-center gap-3 px-4 py-3 text-sm transition-colors cursor-pointer
             ${currentScreen === "configuracoes" ? "text-white" : "text-white/50 hover:text-white hover:bg-white/5"}`}
         >
           <GearIcon />
           {!collapsed && <span>Configurações</span>}
         </button>
 
-        {/* Avatar footer — clicking it expands when collapsed */}
+        {/* Avatar footer — exibe nome e setor do usuário logado */}
         <div
           className="flex items-center gap-3 px-4 py-3 border-t border-white/10"
           style={{ cursor: collapsed ? "pointer" : "default" }}
@@ -191,18 +228,18 @@ export default function Sidebar({ currentScreen, onNavigate, onLogout, collapsed
               boxShadow: collapsed ? "0 0 0 2px rgba(255,255,255,0.2)" : "none",
             }}
           >
-            {CURRENT_USER.initials}
+            {iniciais}
           </div>
           {!collapsed && (
             <div className="flex-1 overflow-hidden">
-              <div className="text-white text-xs font-medium truncate">{CURRENT_USER.name}</div>
-              <div className="text-white/40 text-[11px] truncate">{CURRENT_USER.role}</div>
+              <div className="text-white text-xs font-medium truncate">{nomeExibicao}</div>
+              <div className="text-white/40 text-[11px] truncate">{setorExibicao}</div>
             </div>
           )}
           {!collapsed && (
             <button
               onClick={(e) => { e.stopPropagation(); onLogout(); }}
-              className="text-white/40 hover:text-red-400 transition-colors flex-shrink-0"
+              className="text-white/40 hover:text-red-400 transition-colors flex-shrink-0 cursor-pointer"
               title="Sair"
             >
               <LogoutIcon />
