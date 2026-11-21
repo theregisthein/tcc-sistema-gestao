@@ -16,8 +16,8 @@ return new class extends Migration
             // FK para mensagem_ticket (no DER está 'mensagemTickt_id')
             $table->foreignId('mensagem_ticket_id')->constrained('mensagem_ticket')->cascadeOnDelete();
             
-            // tipo: define se é 'para', 'cc', ou 'cco'
-            $table->enum('tipo', ['to', 'cc', 'bcc'])->default('to');
+            // tipo: define se é 'from' (remetente), 'to' (para), 'cc' ou 'bcc' (cco)
+            $table->enum('tipo', ['from', 'to', 'cc', 'bcc'])->default('to');
             
             $table->string('nome', 150)->nullable();
             $table->string('email', 150);

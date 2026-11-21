@@ -1058,6 +1058,17 @@ export default function Configuracoes() {
 
       if (!res.ok) throw new Error(data.message || "Erro ao atualizar status");
 
+      if (data.log) {
+        console.log("[Toggle Sync E-mail]:", data.log);
+      }
+
+      if (proximoStatus && !data.executou) {
+        setEmailFeedback({
+          tipo: "erro",
+          texto: data.log || data.message || "Ativado, mas houve falha ao conectar na caixa de e-mail.",
+        });
+      }
+
       window.dispatchEvent(new CustomEvent("email-sync-changed", { detail: { ativo: data.ativo } }));
     } catch (err) {
       console.error("Erro no toggle:", err);

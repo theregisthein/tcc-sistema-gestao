@@ -71,7 +71,7 @@ export default function NovoClienteModal({
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: "rgba(11,40,71,0.55)" }}
-      onClick={onClose}
+      //onClick={onClose}
     >
       <div
         className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl overflow-hidden flex flex-col max-h-[92vh]"

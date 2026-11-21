@@ -19,25 +19,13 @@ use Illuminate\Support\Str;
 
 class SyncTicketsEmail extends Command
 {
-    /**
-     * O nome e assinatura do comando de consola.
-     *
-     * @var string
-     */
-    protected $signature = 'tickets:sync-email';
-
-    /**
-     * A descrição do comando.
-     *
-     * @var string
-     */
+    protected $signature = 'tickets:sync-email {--all : Busca também e-mails já lidos recentes para teste}';
     protected $description = 'Sincroniza os e-mails da caixa de suporte e converte-os em tickets';
 
     public function handle()
     {
         $this->info('A verificar credenciais de e-mail ativas...');
 
-        // 1. Procura configuração ativa na tabela email_config
         $config = EmailConfig::where('ativo', true)->first();
 
         if (!$config) {
@@ -46,7 +34,6 @@ class SyncTicketsEmail extends Command
         }
 
         try {
-            // 2. Constrói o cliente IMAP dinamicamente com as credenciais do banco
             $cm = new ClientManager();
             $client = $cm->make([
                 'host'          => $config->host,
@@ -62,12 +49,14 @@ class SyncTicketsEmail extends Command
             $this->info("Ligação estabelecida com sucesso à caixa: {$config->usuario}");
 
             $folder = $client->getFolder('INBOX');
-            
-            // Procura apenas mensagens não lidas
-            $messages = $folder->query()->unseen()->get();
-            $this->info("Mensagens não lidas encontradas: " . count($messages));
 
-            // Procura canal 'E-mail' e status 'Aberto' padrão
+            $query = $folder->query();
+            $messages = $this->option('all')
+                ? $query->all()->limit(5)->get()
+                : $query->unseen()->get();
+
+            $this->info("Mensagens encontradas: " . count($messages));
+
             $canalEmailId = CanalConfig::where('nome', 'like', '%e-mail%')
                 ->orWhere('nome', 'like', '%email%')
                 ->value('id') ?? 4;
@@ -75,139 +64,155 @@ class SyncTicketsEmail extends Command
             $statusAbertoId = StatusConfig::where('nome', 'like', '%aberto%')->value('id') ?? 4;
 
             foreach ($messages as $message) {
-                $remetenteEmail = $message->getFrom()[0]->mail ?? null;
-                $remetenteNome  = $message->getFrom()[0]->personal ?? $remetenteEmail;
+                try {
+                    $fromAttr = $message->getFrom();
+                    $remetenteEmail = $fromAttr[0]->mail ?? null;
+                    $remetenteNome  = $fromAttr[0]->personal ?? $remetenteEmail;
 
-                // Captura do assunto com fallback
-                $assuntoRaw = $message->getSubject() ? (string) $message->getSubject() : '(Sem Assunto)';
-                
-                // Decodifica cabeçalhos MIME (ex: UTF-8, caracteres acentuados)
-                $assuntoDecodificado = @iconv_mime_decode($assuntoRaw, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 'UTF-8');
-                $assunto = $assuntoDecodificado ?: $assuntoRaw;
-
-                $corpoHtml  = $message->hasHTMLBody() ? $message->getHTMLBody() : null;
-                $corpoTexto = $message->hasTextBody() ? $message->getTextBody() : strip_tags($corpoHtml ?? '');
-                $messageId  = $message->getMessageId();
-                $dataEnvio  = $message->getDate() ? Carbon::parse($message->getDate()->first()) : Carbon::now();
-
-                $this->line("A processar e-mail de: {$remetenteEmail} | Assunto: {$assunto}");
-
-                // 3. Procura o Cliente pelo e-mail do remetente
-                $clienteId = null;
-
-                $contato = ContatoCliente::where('email', $remetenteEmail)->first();
-                if ($contato) {
-                    $clienteId = $contato->cliente_id;
-                } else {
-                    $cliente = Cliente::where('emailAdm', $remetenteEmail)->first();
-                    if ($cliente) {
-                        $clienteId = $cliente->id;
+                    if (!$remetenteEmail) {
+                        $this->warn('E-mail sem remetente identificável ignorado.');
+                        continue;
                     }
-                }
 
-                // Se não encontrar, DEVE FICAR NULL (sem cliente)
-                if (!$clienteId) {
-                    $this->warn("Remetente {$remetenteEmail} não associado a nenhum cliente cadastrado. Criando sem cliente vinculado.");
-                }
+                    $assuntoRaw = $message->getSubject() ? (string) $message->getSubject() : '(Sem Assunto)';
+                    $assuntoDecodificado = @iconv_mime_decode($assuntoRaw, ICONV_MIME_DECODE_CONTINUE_ON_ERROR, 'UTF-8');
+                    $assunto = Str::limit($assuntoDecodificado ?: $assuntoRaw, 250, '');
 
-                // 4. Verifica se é resposta a um ticket existente via assunto [TICKET #123]
-                $ticketExistenteId = null;
-                if (preg_match('/\[TICKET\s*#(\d+)\]/i', $assunto, $matches)) {
-                    $ticketExistenteId = $matches[1];
-                }
+                    $corpoHtml  = $message->hasHTMLBody() ? $message->getHTMLBody() : null;
+                    $corpoTexto = $message->hasTextBody() ? $message->getTextBody() : strip_tags($corpoHtml ?? '');
+                    $messageId  = (string) ($message->getMessageId() ?? '');
 
-                $ticket = null;
-                if ($ticketExistenteId) {
-                    $ticket = Ticket::find($ticketExistenteId);
-                }
+                    if ($messageId && MensagemTicket::where('message_id', $messageId)->exists()) {
+                        $this->line("Mensagem já importada ({$messageId}). Marcando como lida...");
+                        $message->setFlag('Seen');
+                        continue;
+                    }
 
-                // 5. Se não existir, abre um NOVO Ticket
-                if (!$ticket) {
-                    $ticket = Ticket::create([
-                        'cliente_id'        => $clienteId,
-                        'status_id'         => $statusAbertoId,
-                        'canal_id'          => $canalEmailId,
-                        'categoria_id'      => null,
-                        'prioridade_id'     => null,
-                        'dataCriacao'       => Carbon::now(),
-                        'titulo'            => $assunto,
-                        'message_id_header' => $messageId,
+                    $rawDate   = $message->getDate()?->first();
+                    $dataEnvio = $rawDate ? Carbon::parse($rawDate) : Carbon::now();
+
+                    $this->line("A processar e-mail de: {$remetenteEmail} | Assunto: {$assunto}");
+
+                    $clienteId = null;
+                    $remetenteLower = mb_strtolower(trim($remetenteEmail));
+
+                    $contato = ContatoCliente::whereRaw('LOWER(email) = ?', [$remetenteLower])->first();
+                    if ($contato) {
+                        $clienteId = $contato->cliente_id;
+                    } else {
+                        $cliente = Cliente::whereRaw('LOWER(emailAdm) = ?', [$remetenteLower])->first();
+                        if ($cliente) {
+                            $clienteId = $cliente->id;
+                        }
+                    }
+
+                    $ticketExistenteId = null;
+                    if (preg_match('/\[TICKET\s*#(\d+)\]/i', $assunto, $matches)) {
+                        $ticketExistenteId = $matches[1];
+                    }
+
+                    $ticket = $ticketExistenteId ? Ticket::find($ticketExistenteId) : null;
+
+                    if (!$ticket) {
+                        $ticket = Ticket::create([
+                            'cliente_id'        => $clienteId,
+                            'status_id'         => $statusAbertoId,
+                            'canal_id'          => $canalEmailId,
+                            'categoria_id'      => null,
+                            'prioridade_id'     => null,
+                            'dataCriacao'       => Carbon::now(),
+                            'titulo'            => $assunto,
+                            'message_id_header' => $messageId ?: null,
+                        ]);
+
+                        $this->info("-> Novo Ticket criado com ID #{$ticket->id}");
+                    } else {
+                        $ticket->update([
+                            'status_id'      => $statusAbertoId,
+                            'dataFinalizado' => null,
+                        ]);
+
+                        $this->info("-> Nova réplica adicionada ao Ticket existente #{$ticket->id} (Status reaberto)");
+                    }
+
+                    $mensagemTicket = MensagemTicket::create([
+                        'ticket_id'   => $ticket->id,
+                        'usuario_id'  => null,
+                        'assunto'     => $assunto,
+                        'corpo_html'  => $corpoHtml,
+                        'corpo_texto' => $corpoTexto,
+                        'message_id'  => $messageId ?: null,
+                        'data_envio'  => $dataEnvio,
                     ]);
 
-                    $this->info("-> Novo Ticket criado com ID #{$ticket->id}");
-                } else {
-                    $this->info("-> Nova réplica adicionada ao Ticket existente #{$ticket->id}");
-                }
+                    // Grava o REMETENTE ORIGINAL (FROM)
+                    MensagemDestinatario::create([
+                        'mensagem_ticket_id' => $mensagemTicket->id,
+                        'tipo'               => 'from',
+                        'nome'               => $remetenteNome,
+                        'email'              => $remetenteEmail,
+                    ]);
 
-                // 6. Grava a Mensagem na tabela mensagem_ticket
-                $mensagemTicket = MensagemTicket::create([
-                    'ticket_id'   => $ticket->id,
-                    'usuario_id'  => null,
-                    'assunto'     => $assunto,
-                    'corpo_html'  => $corpoHtml,
-                    'corpo_texto' => $corpoTexto,
-                    'message_id'  => $messageId,
-                    'data_envio'  => $dataEnvio,
-                ]);
-
-                // 7. Grava Destinatários principais (TO)
-                if ($message->getTo()) {
-                    foreach ($message->getTo() as $to) {
-                        MensagemDestinatario::create([
-                            'mensagem_ticket_id' => $mensagemTicket->id,
-                            'tipo'               => 'to',
-                            'nome'               => $to->personal ?? null,
-                            'email'              => $to->mail ?? '',
-                        ]);
+                    $toList = $message->getTo()?->toArray() ?? [];
+                    foreach ($toList as $to) {
+                        if (!empty($to->mail)) {
+                            MensagemDestinatario::create([
+                                'mensagem_ticket_id' => $mensagemTicket->id,
+                                'tipo'               => 'to',
+                                'nome'               => $to->personal ?? null,
+                                'email'              => $to->mail,
+                            ]);
+                        }
                     }
-                }
 
-                // Grava Destinatários em Cópia (CC)
-                if ($message->getCc()) {
-                    foreach ($message->getCc() as $cc) {
-                        MensagemDestinatario::create([
-                            'mensagem_ticket_id' => $mensagemTicket->id,
-                            'tipo'               => 'cc',
-                            'nome'               => $cc->personal ?? null,
-                            'email'              => $cc->mail ?? '',
-                        ]);
+                    $ccList = $message->getCc()?->toArray() ?? [];
+                    foreach ($ccList as $cc) {
+                        if (!empty($cc->mail)) {
+                            MensagemDestinatario::create([
+                                'mensagem_ticket_id' => $mensagemTicket->id,
+                                'tipo'               => 'cc',
+                                'nome'               => $cc->personal ?? null,
+                                'email'              => $cc->mail,
+                            ]);
+                        }
                     }
-                }
 
-                // 8. Descarrega e guarda os Anexos físicos (se houver)
-                if ($message->hasAttachments()) {
-                    foreach ($message->getAttachments() as $attachment) {
-                        $nomeOriginal = $attachment->getName() ?: 'anexo_' . Str::random(8);
-                        $extensao     = $attachment->getExtension() ?: pathinfo($nomeOriginal, PATHINFO_EXTENSION);
-                        $mimeType     = $attachment->getMimeType() ?: 'application/octet-stream';
-                        $tamanhoBytes = $attachment->getSize() ?: 0;
-                        $cid          = $attachment->getContentId();
+                    if ($message->hasAttachments()) {
+                        foreach ($message->getAttachments() as $attachment) {
+                            $nomeOriginal = Str::limit($attachment->getName() ?: 'anexo_' . Str::random(8), 490, '');
+                            $extensao     = Str::limit($attachment->getExtension() ?: pathinfo($nomeOriginal, PATHINFO_EXTENSION), 10, '');
+                            $mimeType     = Str::limit($attachment->getMimeType() ?: 'application/octet-stream', 95, '');
+                            $tamanhoBytes = $attachment->getSize() ?: 0;
+                            $cid          = $attachment->getContentId();
 
-                        $caminhoRelativo = 'anexos_tickets/' . Str::random(40) . ($extensao ? '.' . $extensao : '');
-                        Storage::disk('public')->put($caminhoRelativo, $attachment->getContent());
+                            $caminhoRelativo = 'anexos_tickets/' . Str::random(40) . ($extensao ? '.' . $extensao : '');
+                            Storage::disk('public')->put($caminhoRelativo, $attachment->getContent());
 
-                        MensagemAnexo::create([
-                            'mensagem_id'  => $mensagemTicket->id,
-                            'nomeOriginal' => $nomeOriginal,
-                            'caminho'      => $caminhoRelativo,
-                            'mimeType'     => $mimeType,
-                            'extensao'     => $extensao,
-                            'tamanhoBytes' => $tamanhoBytes,
-                            'cid'          => $cid,
-                        ]);
+                            MensagemAnexo::create([
+                                'mensagem_id'  => $mensagemTicket->id,
+                                'nomeOriginal' => $nomeOriginal,
+                                'caminho'      => $caminhoRelativo,
+                                'mimeType'     => $mimeType,
+                                'extensao'     => $extensao,
+                                'tamanhoBytes' => $tamanhoBytes,
+                                'cid'          => $cid,
+                            ]);
 
-                        $this->line("   [Anexo Guardado]: {$nomeOriginal}");
+                            $this->line("   [Anexo Guardado]: {$nomeOriginal}");
+                        }
                     }
-                }
 
-                // 9. Marca a mensagem como lida na caixa de correio
-                $message->setFlag('Seen');
+                    $message->setFlag('Seen');
+
+                } catch (\Throwable $msgEx) {
+                    $this->error("Erro ao processar e-mail individual: {$msgEx->getMessage()} (Linha {$msgEx->getLine()})");
+                }
             }
 
-            $this->info('Sincronização de e-mails concluída com sucesso.');
+            $this->info('Sincronização de e-mails concluída.');
 
-        } catch (\Exception $e) {
-            $this->error('Erro durante a sincronização de e-mails: ' . $e->getMessage());
+        } catch (\Throwable $e) {
+            $this->error("Erro de conexão/geral: {$e->getMessage()} (Linha {$e->getLine()})");
             return 1;
         }
 

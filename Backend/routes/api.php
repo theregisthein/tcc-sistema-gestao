@@ -85,3 +85,5 @@ Route::get('/configuracoes/email', [EmailConfigController::class, 'show']);
 Route::put('/configuracoes/email', [EmailConfigController::class, 'update']);
 //Ativar servico via botao nas configuracoes
 Route::post('/configuracoes/email/toggle', [EmailConfigController::class, 'toggle']);
+//Aqui ele inicia ao rtodar o codigo
+Route::post('/configuracoes/email/sync-now', [EmailConfigController::class, 'syncNow']);

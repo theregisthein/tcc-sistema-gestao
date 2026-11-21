@@ -12,6 +12,7 @@ use App\Models\CategoriaConfig;
 use App\Models\CanalConfig;
 use App\Models\Cliente;
 use App\Models\Usuario;
+use App\Models\EmailConfig;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -258,7 +259,7 @@ class TicketController extends Controller
                 'assunto'     => $prefixoAssunto . $assuntoLimpo,
                 'corpo_html'  => nl2br(e($request->mensagem)),
                 'corpo_texto' => $request->mensagem,
-                'eh_interna'  => $ehInterna, // <-- Persiste 1 ou 0 explicitamente - ALTERADO PARA SALVAR A INFORMACAO NO BANCO E NAO APENAS NOCONTROLLER/FRONT
+                'eh_interna'  => $ehInterna,
                 'data_envio'  => Carbon::now(),
             ]);
 
@@ -287,32 +288,66 @@ class TicketController extends Controller
                 return response()->json($mensagem->load(['usuario', 'anexos', 'destinatarios']), 201);
             }
 
-            // 4. Descobre o e-mail de destino para envio externo
+            // 4. Descobre o e-mail de destino priorizando sempre quem enviou a primeira mensagem
             $destinatarioEmail = null;
             $copiasEmails = [];
+            $emailSuporte = mb_strtolower(trim(EmailConfig::value('usuario') ?? ''));
 
-            $primeiraMsg = $ticket->mensagens()->whereNull('usuario_id')->oldest()->first();
+            // Pega a primeira mensagem externa (enviada pelo cliente/contato, onde usuario_id é null)
+            $primeiraMsg = $ticket->mensagens()
+                ->whereNull('usuario_id')
+                ->orderBy('id', 'asc')
+                ->first();
+
             if ($primeiraMsg) {
+                // 4.1. Prioridade absoluta: remetente original registrado como 'from'
                 $fromDest = $primeiraMsg->destinatarios()->where('tipo', 'from')->first();
                 if ($fromDest && filter_var($fromDest->email, FILTER_VALIDATE_EMAIL)) {
                     $destinatarioEmail = $fromDest->email;
                 }
 
+                // 4.2. Fallback para tickets antigos que não tinham 'from' salvo:
+                // procura algum destinatário diferente da caixa de suporte
+                if (!$destinatarioEmail) {
+                    $outroDest = $primeiraMsg->destinatarios()
+                        ->whereRaw('LOWER(email) != ?', [$emailSuporte])
+                        ->first();
+                    if ($outroDest && filter_var($outroDest->email, FILTER_VALIDATE_EMAIL)) {
+                        $destinatarioEmail = $outroDest->email;
+                    }
+                }
+
+                // Mantém em cópia (CC) os demais envolvidos (exceto o próprio destinatário e a caixa de suporte)
                 foreach ($primeiraMsg->destinatarios()->where('tipo', 'cc')->get() as $cc) {
-                    if (filter_var($cc->email, FILTER_VALIDATE_EMAIL) && !str_contains(strtolower($cc->email), 'tcc2026testetcc')) {
+                    $ccLower = mb_strtolower(trim($cc->email));
+                    if (
+                        filter_var($cc->email, FILTER_VALIDATE_EMAIL) &&
+                        $ccLower !== $emailSuporte &&
+                        !str_contains($ccLower, 'tcc2026testetcc') &&
+                        $ccLower !== mb_strtolower(trim($destinatarioEmail ?? ''))
+                    ) {
                         $copiasEmails[] = $cc->email;
                     }
                 }
             }
 
+            // 4.3. Fallback final apenas se o ticket foi aberto manualmente dentro do sistema (sem e-mail de origem)
             if (!$destinatarioEmail && $ticket->cliente) {
-                $destinatarioEmail = $ticket->cliente->emailAdm 
+                $destinatarioEmail = $ticket->cliente->emailAdm
                     ?? $ticket->cliente->contatos()->first()?->email;
             }
 
             if (!$destinatarioEmail) {
                 $destinatarioEmail = 'rinaldiregisthein@gmail.com';
             }
+
+            // Registra na mensagem enviada para quem ela foi disparada
+            MensagemDestinatario::create([
+                'mensagem_ticket_id' => $mensagem->id,
+                'tipo'               => 'to',
+                'nome'               => null,
+                'email'              => $destinatarioEmail,
+            ]);
 
             // 5. Dispara envio de e-mail via SMTP
             if ($destinatarioEmail) {

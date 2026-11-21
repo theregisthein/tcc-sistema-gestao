@@ -34,6 +34,52 @@ export default function Topbar() {
     return () => window.removeEventListener("email-sync-changed", handleSyncEvent);
   }, []);
 
+  // Varredura automática contínua em todas as telas enquanto syncAtivo estiver ligado
+  useEffect(() => {
+    if (!syncAtivo) return;
+
+    let cancelado = false;
+
+    const varrerEmails = async () => {
+      if (cancelado) return;
+      try {
+        setSincronizando(true);
+        const res = await fetch(`${BASE_URL}/configuracoes/email/sync-now`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+        });
+        const data = await res.json();
+
+        if (!cancelado) {
+          if (!res.ok || !data.executou) {
+            console.error("[Erro Sync E-mail]:", data.log || data.message);
+          } else if (data.log) {
+            console.log("[Sync E-mail]:", data.log);
+          }
+        }
+      } catch (err) {
+        if (!cancelado) {
+          console.error("[Erro de rede Sync E-mail]:", err);
+        }
+      } finally {
+        if (!cancelado) {
+          setSincronizando(false);
+        }
+      }
+    };
+
+    varrerEmails(); // Roda imediatamente ao abrir o sistema ou ativar o sync
+    const timer = setInterval(varrerEmails, 45000); // Repete a cada 45 segundos
+
+    return () => {
+      cancelado = true;
+      clearInterval(timer);
+    };
+  }, [syncAtivo]);
+
   async function handleForcarSync() {
     if (sincronizando) return;
     try {
@@ -58,7 +104,6 @@ export default function Topbar() {
   }
 
   const usuario = JSON.parse(localStorage.getItem("user") || "{}");
-  const primeiroNome = usuario.nome ? usuario.nome.split(" ")[0] : "Usuário";
   const iniciais = usuario.nome
     ? usuario.nome.split(" ").map((n) => n[0]).slice(0, 2).join("").toUpperCase()
     : "RR";
